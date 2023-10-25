@@ -44,5 +44,8 @@ legend([{'muscle origin'},{'muscle insersion'},{'joint center'}])
 xlim([-1 1])
 ylim([-1 1])
 axis equal
+xlabel('x')
+ylabel('y')
+zlabel('z')
 
 end
