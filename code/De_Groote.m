@@ -172,7 +172,7 @@ l0m = SX.sym('Optimal_fiber_length',3) ;
 phi0 = SX.sym('Pennation_angle_at_muscle_optimal_fiber_length',3) ;
 f0m = SX.sym('Maximal_isometric_muscle_force',3) ;
 lst = SX.sym('Tendon_slack_length',3) ;
-muscle_tendon_parameters =  horzcat(l0m,phi0,f0m,lst) ; 
+muscle_tendon_parameters =  vertcat(l0m,phi0,f0m,lst) ; 
 
 lt = SX.sym('Normalized_tendon_length',3) ;
 lm = SX.sym('Normalized_muscle_length',3) ;
