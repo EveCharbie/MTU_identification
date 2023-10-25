@@ -48,10 +48,10 @@ Local_Origin_soleus = SX.sym('Local_Origin_soleus',3);
 Local_Insertion_gastrocnemius = SX.sym('Local_Insertion_gastrocnemius',3);
 Local_Origin_gastrocnemius = SX.sym('Local_Origin_gastrocnemius',3);
 muscle_insersion = vertcat( Local_Origin_tibialis_anterior, ...
-    Local_Insertion_tibialis_anterior, ...
     Local_Origin_soleus, ...
-    Local_Insertion_soleus, ...
     Local_Origin_gastrocnemius, ...
+    Local_Insertion_tibialis_anterior, ...
+    Local_Insertion_soleus, ...
     Local_Insertion_gastrocnemius );
 
 known_parameters = vertcat(segment_length, muscle_insersion) ;
@@ -77,24 +77,11 @@ a_t= SX.sym('normalized_neuronal activation',3);
 % axe longitudinal x
 
 R_0_foot = Rototranslation_Rz(x,y,z, theta_foot);
+R_foot_leg = Rototranslation_Rz(-length_foot,0,0, theta_ankle-pi/2);
+R_leg_thigh = Rototranslation_Rz(-length_leg,0,0, theta_knee);
 
-R_0_foot = SX.eye(4);
-R_0_foot(1:2, 1:2) = [ cos(theta_foot), - sin(theta_foot) ; ...
-    sin(theta_foot), cos(theta_foot)] ;
-R_0_foot(1:3,4) = [x, y, z]';
-
-R_foot_leg = SX.eye(4);
-R_foot_leg(1:2, 1:2) =[ cos(theta_ankle), - sin(theta_ankle); ...
-    sin(theta_ankle), cos(theta_ankle)] ;
-R_foot_leg(1,4) = length_foot;
-
-R_leg_limb = SX.eye(4);
-R_leg_limb(1:2, 1:2) = [ cos(theta_knee), - sin(theta_knee); ...
-    sin(theta_knee), cos(theta_knee)] ;
-R_leg_limb(1,4) = length_leg ;
-
-R_0_leg = R_0_foot * R_foot_leg ; %T0_2 = T0_1 * T1_2
-R_0_limb = R_0_leg * R_leg_limb ;
+R_0_leg = R_0_foot * R_foot_leg ; 
+R_0_thigh = R_0_leg * R_leg_thigh ;
 
 %% Joint center
 % TJC = R_0_foot * [0;0;0;1] ; %toe
@@ -102,26 +89,26 @@ R_0_limb = R_0_leg * R_leg_limb ;
 % KJC = R_0_ankle * [0;length_leg;0; 1] ; % knee
 % HJC = R_0_knee * [0;length_thigh;0; 1] ; % hip
 
-TJC = R_0_foot(:,4) ;
-AJC = R_0_leg(:,4) ; % ankle
-KJC = R_0_limb(:,4); % knee
-HJC = R_0_limb * [length_thigh; 0; 0; 1] ; % hip
+TJC = R_0_foot(1:3, 4);
+AJC = R_0_leg(1:3, 4); % ankle
+KJC = R_0_thigh(1:3, 4); % knee
+HJC = Rototranslate(R_0_thigh,  [-length_thigh; 0; 0;]) ; % hip
 
 %% muscle insertion et origine
 %tibialis
-Origin_tibialis_anterior = R_0_leg * [Local_Origin_tibialis_anterior; 1] ;
-Insertion_tibialis_anterior = R_0_foot * [Local_Insertion_tibialis_anterior; 1] ;
+Origin_tibialis_anterior = Rototranslate(R_0_leg, Local_Origin_tibialis_anterior);  
+Insertion_tibialis_anterior = Rototranslate(R_0_foot, Local_Insertion_tibialis_anterior);
 %soleus
-Origin_soleus = R_0_leg * [Local_Origin_soleus; 1] ;
-Insertion_soleus = R_0_foot * [Local_Insertion_soleus; 1] ;
+Origin_soleus = Rototranslate(R_0_leg,  Local_Origin_soleus) ;
+Insertion_soleus = Rototranslate(R_0_foot, Local_Insertion_soleus);
 % gastrocnemius
-Origin_gastrocnemius = R_0_limb * [Local_Origin_gastrocnemius; 1] ;
-Insertion_gastrocnemius = R_0_foot * [Local_Insertion_gastrocnemius; 1] ;
+Origin_gastrocnemius = Rototranslate(R_0_thigh, Local_Origin_gastrocnemius) ;
+Insertion_gastrocnemius = Rototranslate(R_0_foot, Local_Insertion_gastrocnemius) ;
 
 
-Origin = horzcat(Origin_tibialis_anterior(1 :3), Origin_soleus(1 :3), Origin_gastrocnemius(1 :3));
-Insertion = horzcat(Insertion_tibialis_anterior(1 :3),Insertion_soleus(1 :3),Insertion_gastrocnemius(1 :3));
-Markers = horzcat(TJC(1 :3), AJC(1 :3), KJC(1 :3), HJC(1 :3));
+Origin = horzcat(Origin_tibialis_anterior, Origin_soleus, Origin_gastrocnemius);
+Insertion = horzcat(Insertion_tibialis_anterior, Insertion_soleus, Insertion_gastrocnemius);
+Markers = horzcat(TJC, AJC, KJC, HJC);
 
 
 %% functions
