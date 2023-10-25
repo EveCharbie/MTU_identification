@@ -41,13 +41,13 @@ segment_length = vertcat(length_foot, length_leg, length_thigh);
 % Igap : insersion proximal du gastrocnemius (sur la cuisse)
 
 % position dans le repère local x,y, z (=0)
-Itad = SX.sym('Local_Insertion_tibialis_anterior',3);
-Itap = SX.sym('Local_Origin_tibialis_anterior',3);
+origin_tibial_ant = SX.sym('Local_Insertion_tibialis_anterior',3);
+insertion_tibial_ant = SX.sym('Local_Origin_tibialis_anterior',3);
 Isod = SX.sym('Local_Insertion_soleus',3);
 Isop = SX.sym('Local_Origin_soleus',3);
 Igad = SX.sym('Local_Insertion_gastrocnemius',3);
 Igap = SX.sym('Local_Origin_gastrocnemius',3);
-muscle_insersion = vertcat(Itad, Itap, Isod, Isop, Igad, Igap);
+muscle_insersion = vertcat(origin_tibial_ant, insertion_tibial_ant, Isod, Isop, Igad, Igap);
 
 known_parameters = vertcat(segment_length, muscle_insersion) ; 
 
@@ -101,8 +101,8 @@ HJC = R_0_limb * [length_thigh; 0; 0; 1] ; % hip
 
     %% muscle insertion et origine
 %tibialis
-ITAD = R_0_foot * [Itad; 1] ; 
-ITAP = R_0_leg * [Itap; 1] ; 
+ITAD = R_0_foot * [origin_tibial_ant; 1] ; 
+ITAP = R_0_leg * [insertion_tibial_ant; 1] ; 
 %soleus
 ISOD = R_0_foot * [Isod; 1] ; 
 ISOP = R_0_leg * [Isop; 1] ; 
