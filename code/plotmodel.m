@@ -20,21 +20,29 @@ function plotmodel(muscle_origins, muscle_insertions, joint_centers)
 % EXAMPLE:
 %   plotmodel(rand(3,4), rand(3,4), rand(3,4));
 
-Onumeric = full(muscle_origins);
-Inumeric = full(muscle_insertions); 
-Mnumeric = full(joint_centers);
+
+
+origins = full(muscle_origins);
+insertions = full(muscle_insertions);
+markers = full(joint_centers);
 %%
 figure("Name","model", "Color",[1 1 1])
-plot3(Onumeric(1,:),Onumeric(2,:),Onumeric(3,:),'or')
-hold on 
-plot3(Inumeric(1,:),Inumeric(2,:),Inumeric(3,:),'ob')
-plot3(Mnumeric(1,:),Mnumeric(2,:),Mnumeric(3,:),'ok')
+plot3(origins(1,:), origins(2,:), origins(3,:),'or')
+hold on
+plot3(insertions(1,:), insertions(2,:), insertions(3,:),'ob')
+plot3(markers(1,:), markers(2,:), markers(3,:),'ok')
 
-for i = 1:3
-    line([Mnumeric(1,i),Mnumeric(1,i+1)], [Mnumeric(2,i),Mnumeric(2,i+1)], [Mnumeric(3,i),Mnumeric(3,i+1)],'Color','black')
-    line([Onumeric(1,i),Inumeric(1,i)], [Onumeric(2,i),Inumeric(2,i)], [Onumeric(3,i),Inumeric(3,i)],'Color','red')
+for i = 1:size(markers,2)-1
+    line([markers(1,i),markers(1,i+1)], [markers(2,i),markers(2,i+1)], [markers(3,i),markers(3,i+1)],'Color','black')
 end
+
+for i = 1:size(origins,2)
+    line([origins(1,i),insertions(1,i)], [origins(2,i),insertions(2,i)], [origins(3,i),insertions(3,i)],'Color','red')
+end
+
 legend([{'muscle origin'},{'muscle insersion'},{'joint center'}])
 xlim([-1 1])
 ylim([-1 1])
+axis equal
+
 end
