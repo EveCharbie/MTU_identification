@@ -190,14 +190,16 @@ Tendon_Force = Function('Tendon_Force', {q,known_parameters,muscle_tendon_parame
 
 %% Muscle
 % Active muscle force-length (S2)
-b11 = 0.815 ; b21 = 1.055 ; b31 = 0.162 ; b41 = 0.063 ; % first Gaussian parameter
-b12 = 0.433 ; b22 = 0.717 ; b32 = -0.030 ; b42 = 0.200 ; % second Gaussian parameter
-b13 = 0.100 ; b23 = 1.000 ; b33 = 0.354 ;  b43 = 0.000 ; % third Gaussian parameter
+b11 = 0.815 ; b21 = 1.055 ; b31 = 0.162 ; b41 = 0.063 ; % first Gaussian coefficents
+b12 = 0.433 ; b22 = 0.717 ; b32 = -0.030 ; b42 = 0.200 ; % second Gaussian coefficents
+b13 = 0.100 ; b23 = 1.000 ; b33 = 0.354 ;  b43 = 0.000 ; % third Gaussian coefficents
 
 
 NormalizedMuscleActiveForceLength = (b11 .* exp((-0.5.* (lm - b21).^2)./ (b31 + b41 .* lm))) + ...
     (b12 .* exp((-0.5.* (lm - b22).^2)./ (b32 + b42 .* lm))) + ...
     (b13 .* exp((-0.5.* (lm - b23).^2)./ (b33 + b43 .* lm))) ;
+
+
 
 Normalized_Muscle_Active_Force_Length = Function('Normalized_Muscle_Active_Force_Length', {q,known_parameters,lm}, {NormalizedMuscleActiveForceLength}, ...
     {'q','known_parameters','lm'}, {'NormalizedMuscleActiveForceLength'}) ;
@@ -229,9 +231,8 @@ NormalizedMuscleForceVelocity = 1 ; % vitesse = 0
 
 %% Forces function
 
-NormalizedMuscleForce = a .* NormalizedMuscleActiveForceLength .* NormalizedMusclePassiveForceLength + ...
-    NormalizedMuscleForceVelocity ;
-
+NormalizedMuscleForce = a .* NormalizedMuscleActiveForceLength .* NormalizedMuscleForceVelocity + NormalizedMusclePassiveForceLength ;
+   
 Normalized_Muscle_Force = Function('Normalized_Muscle_Force', {q,known_parameters,lm,a}, {NormalizedMuscleForce}, ...
     {'q','known_parameters','lm','a'}, {'NormalizedMuscleForce'}) ;
 
@@ -246,9 +247,6 @@ Muscle_Force = Function('Muscle_Force', {q,known_parameters,muscle_tendon_parame
 moment_articulaire = moment_arm' * TendonForce ;
 Momentarticualire = Function('Momentarticualire', {q,known_parameters,muscle_tendon_parameters,lt}, {moment_articulaire}, ...
     {'q','known_parameters','muscle_tendon_parameters','lt'}, {'moment_articulaire'}) ;
-
-
-
 
 
 %% function d'optimisation
