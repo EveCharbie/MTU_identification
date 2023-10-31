@@ -67,8 +67,8 @@ known_parameters = vertcat(segment_length, muscle_insersion) ;
 % lambda = SX.sym('Percentage_change_in_optimal_fibre_length',3);
 %
 % % mesure
-% lm = SX.sym('mesured_muscle_length',3);
-% phi = SX.sym('muscle_pennation_angle',3);
+% length_muscle_normalized = SX.sym('mesured_muscle_length',3);
+% pennation_angle = SX.sym('muscle_pennation_angle',3);
 a_t= SX.sym('normalized_neuronal activation',3);
 
 
@@ -118,7 +118,7 @@ ForwardKinematics = Function('ForwardKinematics', {q, known_parameters}, {Origin
 
 umt_length = sqrt(sum((Insertion - Origin).^2));
 UMTLength = Function('UMTLength', {q, known_parameters}, {umt_length}, ...
-    {'q', 'known_parameters'}, {'muscle_length'});
+    {'q', 'known_parameters'}, {'umt_length'});
 
 moment_arm = jacobian(umt_length, q);
 MomentArm = Function('MomentArm', {q, known_parameters}, {moment_arm}, ...
@@ -169,24 +169,38 @@ f0m = SX.sym('Maximal_isometric_muscle_force',3) ;
 lst = SX.sym('Tendon_slack_length',3) ;
 muscle_tendon_parameters =  vertcat(l0m,phi0,f0m,lst) ;
 
-lt = SX.sym('Normalized_tendon_length',3) ;
-lm = SX.sym('Normalized_muscle_length',3) ;
-phi = SX.sym('Pennation_angle',3) ;
 
-% input a
+%% architectural parameter
+length_tendon_normalized = SX.sym('Normalized_tendon_length',3) ;
+length_muscle_normalized = SX.sym('Normalized_muscle_length',3) ;
+length_tendon = SX.sym('tendon_length',3) ;
+length_muscle = SX.sym('muscle_length',3) ;
+
+
+LengthTendonNomralized = length_tendon ./ lst ; 
+Length_Tendon_Nomralized = Function('Length_Tendon_Nomralized', {length_tendon,muscle_tendon_parameters}, {LengthTendonNomralized}, ...
+    {'length_tendon_normalized','muscle_tendon_parameters'}, {'length_tendon'}) ;
+
+LengthMuscleNomralized = length_muscle ./ l0m ; 
+Length_Muscle_Nomralized = Function('Length_Muscle_Nomralized', {length_muscle,muscle_tendon_parameters}, {LengthMuscleNomralized}, ...
+    {'length_muscle_normalized','muscle_tendon_parameters'}, {'LengthMuscleNomralized'}) ;
+
+pennation_angle =  asin(l0m .*  sin(phi0) ./ length_muscle_normalized) ;
+Pennation_Angle = Function('Pennation_Angle', {length_muscle_normalized,muscle_tendon_parameters}, {pennation_angle}, ...
+    {'length_muscle_normalized','muscle_tendon_parameters'}, {'pennation_angle'}) ;
 
 %% Tendon
 % Tendon force-length (S1)
 kT = 35 ; c1 = 0.200 ; c2 = 0.995 ; c3 = 0.250 ; % tendon parameters
-NormalizedTendonForce = c1 .* exp(kT .* (lt - c2)) - c3 ; % tendon force function
+NormalizedTendonForce = c1 .* exp(kT .* (length_tendon_normalized - c2)) - c3 ; % tendon force function
 
-Normalized_Tendon_Force = Function('Normalized_Tendon_Force', {q,known_parameters,lt}, {NormalizedTendonForce}, ...
-    {'q','known_parameters','lt'}, {'NormalizedTendonForce'}) ;
+Normalized_Tendon_Force = Function('Normalized_Tendon_Force', {q,known_parameters,length_tendon_normalized}, {NormalizedTendonForce}, ...
+    {'q','known_parameters','length_tendon_normalized'}, {'NormalizedTendonForce'}) ;
 
 TendonForce= NormalizedTendonForce .* f0m ; 
 
-Tendon_Force = Function('Tendon_Force', {q,known_parameters,muscle_tendon_parameters,lt}, {TendonForce}, ...
-    {'q','known_parameters','muscle_tendon_parameters','lt'}, {'TendonForce'}) ;
+Tendon_Force = Function('Tendon_Force', {q,known_parameters,muscle_tendon_parameters,length_tendon_normalized}, {TendonForce}, ...
+    {'q','known_parameters','muscle_tendon_parameters','length_tendon_normalized'}, {'TendonForce'}) ;
 
 %% Muscle
 % Active muscle force-length (S2)
@@ -195,31 +209,31 @@ b12 = 0.433 ; b22 = 0.717 ; b32 = -0.030 ; b42 = 0.200 ; % second Gaussian coeff
 b13 = 0.100 ; b23 = 1.000 ; b33 = 0.354 ;  b43 = 0.000 ; % third Gaussian coefficents
 
 
-NormalizedMuscleActiveForceLength = (b11 .* exp((-0.5.* (lm - b21).^2)./ (b31 + b41 .* lm))) + ...
-    (b12 .* exp((-0.5.* (lm - b22).^2)./ (b32 + b42 .* lm))) + ...
-    (b13 .* exp((-0.5.* (lm - b23).^2)./ (b33 + b43 .* lm))) ;
+NormalizedMuscleActiveForceLength = (b11 .* exp((-0.5.* (length_muscle_normalized - b21).^2)./ (b31 + b41 .* length_muscle_normalized))) + ...
+    (b12 .* exp((-0.5.* (length_muscle_normalized - b22).^2)./ (b32 + b42 .* length_muscle_normalized))) + ...
+    (b13 .* exp((-0.5.* (length_muscle_normalized - b23).^2)./ (b33 + b43 .* length_muscle_normalized))) ;
 
 
 
-Normalized_Muscle_Active_Force_Length = Function('Normalized_Muscle_Active_Force_Length', {q,known_parameters,lm}, {NormalizedMuscleActiveForceLength}, ...
-    {'q','known_parameters','lm'}, {'NormalizedMuscleActiveForceLength'}) ;
+Normalized_Muscle_Active_Force_Length = Function('Normalized_Muscle_Active_Force_Length', {q,known_parameters,length_muscle_normalized}, {NormalizedMuscleActiveForceLength}, ...
+    {'q','known_parameters','length_muscle_normalized'}, {'NormalizedMuscleActiveForceLength'}) ;
 
 
 MuscleActiveForceLength = NormalizedMuscleActiveForceLength .* f0m ; 
 
-Muscle_Active_Force_Length = Function('Muscle_Active_Force_Length', {q,known_parameters,muscle_tendon_parameters,lm,a}, {MuscleActiveForceLength}, ...
-    {'q','known_parameters','muscle_tendon_parameters','lm','a'}, {'MuscleActiveForceLength'}) ;
+Muscle_Active_Force_Length = Function('Muscle_Active_Force_Length', {q,known_parameters,muscle_tendon_parameters,length_muscle_normalized,a}, {MuscleActiveForceLength}, ...
+    {'q','known_parameters','muscle_tendon_parameters','length_muscle_normalized','a'}, {'MuscleActiveForceLength'}) ;
 
 % Passive muscle force-length (S3)
 kpe = 4.0 ; e0 = 0.6 ;
-NormalizedMusclePassiveForceLength = (exp(((kpe .* (lm - 1))./e0)) - 1)./ (exp(kpe) - 1) ;
+NormalizedMusclePassiveForceLength = (exp(((kpe .* (length_muscle_normalized - 1))./e0)) - 1)./ (exp(kpe) - 1) ;
 
-Normalized_Muscle_Passive_Force_Length = Function('Normalized_Muscle_Passive_Force_Length', {q,known_parameters,lm}, {NormalizedMusclePassiveForceLength}, ...
-    {'q','known_parameters','lm'}, {'NormalizedMusclePassiveForceLength'}) ;
+Normalized_Muscle_Passive_Force_Length = Function('Normalized_Muscle_Passive_Force_Length', {q,known_parameters,length_muscle_normalized}, {NormalizedMusclePassiveForceLength}, ...
+    {'q','known_parameters','length_muscle_normalized'}, {'NormalizedMusclePassiveForceLength'}) ;
 
 MusclePassiveForceLength = NormalizedMusclePassiveForceLength .* f0m ; 
-Muscle_Passive_Force_Length = Function('Muscle_Passive_Force_Length', {q,known_parameters,muscle_tendon_parameters,lm,a}, {MusclePassiveForceLength}, ...
-    {'q','known_parameters','muscle_tendon_parameters','lm','a'}, {'MusclePassiveForceLength'}) ;
+Muscle_Passive_Force_Length = Function('Muscle_Passive_Force_Length', {q,known_parameters,muscle_tendon_parameters,length_muscle_normalized}, {MusclePassiveForceLength}, ...
+    {'q','known_parameters','muscle_tendon_parameters','length_muscle_normalized'}, {'MusclePassiveForceLength'}) ;
 
 % Muscle force-velocity (S4)
 % d1 -0.318
@@ -233,66 +247,32 @@ NormalizedMuscleForceVelocity = 1 ; % vitesse = 0
 
 NormalizedMuscleForce = a .* NormalizedMuscleActiveForceLength .* NormalizedMuscleForceVelocity + NormalizedMusclePassiveForceLength ;
    
-Normalized_Muscle_Force = Function('Normalized_Muscle_Force', {q,known_parameters,lm,a}, {NormalizedMuscleForce}, ...
-    {'q','known_parameters','lm','a'}, {'NormalizedMuscleForce'}) ;
+Normalized_Muscle_Force = Function('Normalized_Muscle_Force', {q,known_parameters,length_muscle_normalized,a}, {NormalizedMuscleForce}, ...
+    {'q','known_parameters','length_muscle_normalized','a'}, {'NormalizedMuscleForce'}) ;
 
 MuscleForce = NormalizedMuscleForce .* f0m ; 
 
-Muscle_Force = Function('Muscle_Force', {q,known_parameters,muscle_tendon_parameters,lm,a}, {MuscleForce}, ...
-    {'q','known_parameters','muscle_tendon_parameters','lm','a'}, {'MuscleForce'}) ;
+Muscle_Force = Function('Muscle_Force', {q,known_parameters,muscle_tendon_parameters,length_muscle_normalized,a}, {MuscleForce}, ...
+    {'q','known_parameters','muscle_tendon_parameters','length_muscle_normalized','a'}, {'MuscleForce'}) ;
 
 %% Computing Joint Moments and Angles
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Moment articulaire Mj(θ, t) = ∑ i=1 m (ri(θ) ⋅ Fimt(θ, t))
 moment_articulaire = moment_arm' * TendonForce ;
-Momentarticualire = Function('Momentarticualire', {q,known_parameters,muscle_tendon_parameters,lt}, {moment_articulaire}, ...
-    {'q','known_parameters','muscle_tendon_parameters','lt'}, {'moment_articulaire'}) ;
+Momentarticualire = Function('Momentarticualire', {q,known_parameters,muscle_tendon_parameters,length_tendon_normalized}, {moment_articulaire}, ...
+    {'q','known_parameters','muscle_tendon_parameters','length_tendon_normalized'}, {'moment_articulaire'}) ;
 
 
 %% function d'optimisation
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
-% 1. « Trouver »  des valeurs de paramètres qui font un peu de sens  :
-% issues d'un scale opensim
-% soleus
-Sol_f0m = 3600 ;
-Sol_l0m = 0.031 ;
-Sol_phi0 = 0.20943951 ; %rad
-Sol_lst = 0.31 ;
-
-% Gast
-Gast_f0m = 2500 ;
-Gast_l0m = 0.09 ;
-Gast_phi0 = 0.29670597 ; %rad
-Gast_lst = 0.36 ;
-
-% Ta
-Ta_f0m = 3000 ;
-Ta_l0m = 0.098 ;
-Ta_phi0 = 0.29670597 ; %rad
-Ta_lst = 0.08726646 ;
-
-% 2. Déterminer des bornes physiologiques pour les paramètres (en faire des vecteurs : min_param et max_param)
-%min_param =
-%Ta_phi0 = 0
-% Ta_l0m = 0
-%max_param =
-% Ta_phi0 = pi/2
-% Ta_l0m = 0.25
-% Ta_lst =
-
-
-% 3. Générer tes essais (en faire une liste et appeler les fonctions pour avoir les couples de référence et les longueurs du tendon et du muscle)
-
-% 4. Ecrire le pb d’optimisation
 unknown_parameters = horzcat(l0m,phi0,f0m,lst) ;
 %%
 % f minimisation quadratique
 T = SX.sym('Mesured_torque',1) ;
 
 f = (T -sum(moment_articulaire)).^2 ;
-% g = Ft - Fm*cos(phi)
+% g = Ft - Fm*cos(pennation_angle)
 
 % %%
 % nlp = struct('x',unknown_parameters, 'f',f, 'g',g);
