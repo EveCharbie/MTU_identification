@@ -245,16 +245,16 @@ getMuscleActiveForce = Function('getMuscleActiveForce', ...
 jointMoment = momentArm' * tendonForce ;
 getJointMoment = Function('getJointMoment', ...
     {states, known_parameters, muscleTendonParameters}, {jointMoment}, ...
-    {'states', 'known_parameters', 'muscle_tendon_parameters'}, {'jointMoment'}) ;
+    {'states', 'known_parameters', 'muscle_tendon_parameters'}, {'jointMoment'});
 
 
 %% Muscle-tendon equilibrium
 % determine muscle length such that TendonForce - (cos(pennation_angle) .* MuscleForce) = 0
 
-g0 = tendonForce - (cos(pennationAngle) .* muscleForce) ; 
+g0 = tendonForce - (cos(pennationAngle) .* muscleForce); 
 % g1 = umtLength' - (cos(pennationAngle) .* muscleLength + tendonLength) ; 
 % g = Function('g',[tendonLength, muscleLength],[g0, g1]) ; 
-g = Function('g',[muscleLength],[g0]) ; 
+g = Function('g', [muscleLength, vertcat(states, known_parameters, muscleTendonParameters)], [g0]); 
 
 equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','newton',g) ; 
 
