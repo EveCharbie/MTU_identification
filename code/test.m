@@ -158,8 +158,8 @@ hold off
 
 %% test of the  moment arm function
 for i = 1 :  length (lm_num)
-MA  = Momentarticualire(q_num,known_parameters_num,muscle_tendon_parameters_num,lt_num(:,i)); 
-Moment(:,i) = full(MA) ; 
+    MA  = Momentarticualire(q_num,known_parameters_num,muscle_tendon_parameters_num,lt_num(:,i)); 
+    Moment(:,i) = full(MA) ; 
 end
 
 figure

@@ -1,5 +1,5 @@
 function [rotation_matrix] = Rototranslation_Rz(x,y,z, rotZ)
-import casadi.*
+import casadi.SX
 
 rotation_matrix = SX.eye(4);
 rotation_matrix(1:2, 1:2) = [ cos(rotZ), -sin(rotZ) ; ...
