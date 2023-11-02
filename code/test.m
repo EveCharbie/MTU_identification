@@ -1,23 +1,7 @@
 %% test casadi functions
 %run('.\De_Groote'); 
-%% test du model géometrique (OK)
-De_Groote ; 
-% foot; leg; thigh
-segment_length_num = [.2; .4; .45];
 
-% Origin TA, SO, GA; insertion TA; SO; GA
-muscle_origin = [-.3; .01 ; 0 ; 
-    -.3 ; -.01 ; 0 ; 
-    -.02; -.01 ; 0 ];
-
-muscle_insersion = [-.17; 0.01; 0 ; 
-    -.23; -.02; 0 ; 
-    -.23; -.02; 0];
-
-known_parameters_num = [segment_length_num;muscle_origin;muscle_insersion];
-
-q_num = [0; 0; 0; -20/180*pi; 10/180*pi; 50/180*pi];
-
+example_state_param; 
 
 [muscle_origin_in0, muscle_insertion_in0, joint_centers] = ForwardKinematics(q_num, known_parameters_num);
 umt_length = UMTLength(q_num, known_parameters_num);
@@ -32,12 +16,6 @@ moment_arms = MomentArm(q_num, known_parameters_num);
 lm_num = [0 : 0.01 : 1.7 ; 0 : 0.01 : 1.7 ; 0 : 0.01 : 1.7] ; 
 lt_num =  [linspace(0.95,1.05,length(lm_num(1,:))) ; linspace(0.95,1.05,length(lm_num(1,:))) ; linspace(0.95,1.05,length(lm_num(1,:)))] ; 
 a_num = ones(3,1) ;
-% TA; SO; GA;
-l0m_num = [0.098 ;  0.031 ; 0.09] ; 
-phi0_num = [0.29670597 ; 0.20943951 ; 0.29670597 ] ;
-f0m_num = [3000 ; 3600 ; 2500] ; 
-lst_num = [0.08726646 ; 0.31 ; 0.36 ] ; 
-muscle_tendon_parameters_num =  [l0m_num ; phi0_num ; f0m_num ; lst_num ] ; 
 
 % from OISM
 % % soleus
@@ -166,26 +144,3 @@ figure
 plot(lt_num(1,:),Moment(5,:))
 
 
-%% faire longueur non nomralized 
-%% fonction de contrainte 
-length_tendon = lst_num + 0.01;
-length_muscle = SX.sym('Muscle_length',3) ;
-
-length_tendon_normalized_num = Length_Tendon_Nomralized(length_tendon,muscle_tendon_parameters_num) ; 
-length_muscle_normalized_num = Length_Muscle_Nomralized(length_muscle,muscle_tendon_parameters_num) ; 
-
-Ttest = Tendon_Force(q_num,known_parameters_num,muscle_tendon_parameters_num,length_tendon_normalized_num) ;
-
-
-g0 = TendonForce - (cos(pennation_angle) .* MuscleForce) ; 
-g1 = umt_length' - (cos(pennation_angle) .* length_muscle + length_tendon) ; 
-
-g = Function('g',[length_tendon,length_muscle],[g0,g1]) ; 
-G = rootfinder('G','newton',g) ; 
-
-%%
-% z = SX.sym('x',nz);
-% x = SX.sym('x',nx);
-% 
-% g = Function('g',{z,x},{g0,g1});
-% G = rootfinder('G','newton',g);
