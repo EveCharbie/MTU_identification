@@ -201,7 +201,7 @@ NormalizedMuscleForceVelocity = 1 ; % vitesse = 0
 %% Forces function
 normalizedMuscleForce = a .* normalizedMuscleActiveForceLength .* NormalizedMuscleForceVelocity + normalizedMusclePassiveForce ;   
 muscleForce = normalizedMuscleForce .* maximalIsometricForce ; 
-
+1+1 
 
 %% Create all muscle-tendon functions
 getTendonForce = Function('getTendonForce', ...
