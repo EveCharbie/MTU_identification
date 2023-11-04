@@ -30,7 +30,7 @@ x_num = equilibrateMuscleTendon(x0, p_num) ;
 tendonLengthening_num = x_num(1:nMuscles);
 fiberLength_num = x_num(nMuscles+1:end);
 
-all_states_num = [musculoskeletal_states_num,  tendonLengthening_num', fiberLength_num' , a_num] ;
+all_states_num = [musculoskeletal_states_num,  fiberLength_num', tendonLengthening_num' , a_num] ;
 
 pennationAngle_ = getPennationAngle(all_states_num,muscle_tendon_parameters_num) ; % Not OK [AM]
 tendonForce_ = getTendonForce(all_states_num, muscle_tendon_parameters_num)
