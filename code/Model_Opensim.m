@@ -2,9 +2,7 @@
 
 % import the model (De_Groot)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
 De_Groote_opensim ; 
-
 
 % Muscle insetion extract from  Opensim
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -59,56 +57,31 @@ muscle_insersion = [TA_insersion' ;
     SOL_insersion' ; 
     GAST_insersion' ];
 
-known_parameters_num = [segment_geometry_num; muscle_origin; muscle_insersion];
-
-q_num = [0, 0 , 0, 0, (0/180)*pi , (10/180)*pi ] ; 
-%% test geometry
-
-[muscle_origin_in0, muscle_insertion_in0, joint_centers] = ForwardKinematics(q_num, known_parameters_num);
-umt_length = getUMTLength(q_num, known_parameters_num); 
-moment_arms = getMomentArm(q_num, known_parameters_num);
-
- plotmodel(muscle_origin_in0, muscle_insertion_in0, joint_centers)
 
 
-% %%
-% 
-% 
-% 
-% 
-% 
-% %%
-% % neuro musculo skeltical states (random)
-% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% q_num = [0; 0; 0; -20/180*pi; 10/180*pi; 50/180*pi];
-% activation_ = [.2; .3; .4]; 
-% state_num = [q_num; activation_];
-% 
+
 % % Muscle parameter extract from  Opensim
 % %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% % TA; SO; GA;
-% 
-%     % TA
-% TA_l0m = 0.098 ; 
-% TA_phi0 = 0.08726646 ; 
-% TA_f0m = 905.0 ; 
-% TA_lst = 0.223 ; 
-% 
-%     % SOL
-% SOL_l0m = 0.05 ; 
-% SOL_phi0 = 0.43633231 ; 
-% SOL_f0m = 3549.0 ; 
-% SOL_lst = 0.25 ; 
-% 
-%     %GM (medial, lateral)
-% GAST_l0m = mean(0.06, 0.064) ; 
-% GAST_phi0 = mean(0.29670597, 0.13962634) ; 
-% GAST_f0m = sum(1558.0 ,683.0); 
-% GAST_lst = mean(0.39, 0.38); 
-% 
-%     % define muscle tendon parameter 
-% l0m_num = [TA_l0m ;  SOL_l0m ; GAST_l0m ] ; 
-% phi0_num = [TA_phi0  ; SOL_phi0 ; GAST_phi0  ] ;
-% f0m_num = [TA_f0m ; SOL_f0m ; GAST_f0m] ; 
-% lst_num = [TA_lst ; SOL_lst ; GAST_lst ] ; 
-% muscle_tendon_parameters_num =  [l0m_num ; phi0_num ; f0m_num ; lst_num ] ; 
+    % TA
+TA_l0m = 0.098 ; 
+TA_phi0 = 0.08726646 ; 
+TA_f0m = 905.0 ; 
+TA_lst = 0.223 ; 
+
+    % SOL
+SOL_l0m = 0.05 ; 
+SOL_phi0 = 0.43633231 ; 
+SOL_f0m = 3549.0 ; 
+SOL_lst = 0.25 ; 
+
+    %GM (medial, lateral)
+GAST_l0m = mean([0.06, 0.064]) ; 
+GAST_phi0 = mean([0.29670597, 0.13962634]) ; 
+GAST_f0m = sum([1558.0 ,683.0]); 
+GAST_lst = mean([0.39, 0.38]); 
+
+    % define muscle tendon parameter 
+l0m_num = [TA_l0m ,  SOL_l0m , GAST_l0m ] ; 
+phi0_num = [TA_phi0  , SOL_phi0 , GAST_phi0  ] ;
+f0m_num = [TA_f0m , SOL_f0m , GAST_f0m] ; 
+lst_num = [TA_lst , SOL_lst , GAST_lst ] ; 
