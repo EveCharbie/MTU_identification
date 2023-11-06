@@ -214,6 +214,9 @@ normalizedFiberLength = fiberLength ./ optimalFiberLength;
 kT = 35; c1 = 0.200; c2 = 0.995; c3 = 0.250; % tendon parameters
 normalizedTendonForce = c1 .* exp(kT .* (normalizedTendonLength - c2)) - c3; 
 tendonForce= normalizedTendonForce .* maximalIsometricForce ; 
+tendonForce_f = @(normalizedTendonLength,maximalIsometricForce) (c1 .* exp(kT .* (normalizedTendonLength - c2)) - c3) .* maximalIsometricForce ; 
+
+
 
     %% Muscle Force Equations
     %%%%%%%%%%%%%
@@ -228,11 +231,18 @@ normalizedMuscleActiveForceLength = (b11 .* exp((-0.5.* (normalizedFiberLength -
 
 MuscleActiveForceLength = normalizedMuscleActiveForceLength .* maximalIsometricForce ; 
 
+MuscleActiveForceLength_f =@(normalizedFiberLength, maximalIsometricForce,a) ((b11 .* exp((-0.5.* (normalizedFiberLength - b21).^2)./ (b31 + b41 .* normalizedFiberLength))) + ...
+    (b12 .* exp((-0.5.* (normalizedFiberLength - b22).^2)./ (b32 + b42 .* normalizedFiberLength))) + ...
+    (b13 .* exp((-0.5.* (normalizedFiberLength - b23).^2)./ (b33 + b43 .* normalizedFiberLength)))) .* maximalIsometricForce .*a ;
+
+
 % Passive muscle force-length (S3)
 kpe = 4.0 ; e0 = 0.6 ;
 normalizedMusclePassiveForce = (exp(((kpe .* (normalizedFiberLength - 1))./e0)) - 1)./ (exp(kpe) - 1) ;
 
 musclePassiveForce = normalizedMusclePassiveForce .* maximalIsometricForce ; 
+musclePassiveForce_f = @(normalizedFiberLength, maximalIsometricForce) (exp(((kpe .* (normalizedFiberLength - 1))./e0)) - 1)./ (exp(kpe) - 1) .* maximalIsometricForce ; 
+
 
 % Muscle force-velocity (S4)
 % d1 -0.318
