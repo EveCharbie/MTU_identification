@@ -222,36 +222,40 @@ normalizedFiberLength = fiberLength ./ optimalFiberLength;
     %%%%%%%%%%%%%
 % Tendon force-length (S1)
 kT = 35; c1 = 0.200; c2 = 0.995; c3 = 0.250; % tendon parameters
-normalizedTendonForce = c1 .* exp(kT .* (normalizedTendonLength - c2)) - c3; 
-tendonForce= normalizedTendonForce .* maximalIsometricForce ; 
-tendonForce_f = @(normalizedTendonLength,maximalIsometricForce) (c1 .* exp(kT .* (normalizedTendonLength - c2)) - c3) .* maximalIsometricForce ; 
 
+normalizedTendonForcePart1 = normalizedTendonLength * 0 ;
+normalizedTendonForcePart2 = c1 .* exp(kT .* (normalizedTendonLength - c2)) - c3; 
+normalizedTendonForce = normalizedTendonForcePart1 + if_else(normalizedTendonLength < 1, 0, normalizedTendonForcePart2); % if normalized length under 0 the force = 0 
+
+% normalizedTendonForce = c1 .* exp(kT .* (normalizedTendonLength - c2)) - c3; 
+tendonForce= normalizedTendonForce .* maximalIsometricForce ; 
 
 
     %% Muscle Force Equations
     %%%%%%%%%%%%%
 % Active muscle force-length (S2)
-b11 = 0.815 ; b21 = 1.055 ; b31 = 0.162 ;  b41 = 0.063 ; % first Gaussian coefficents
-b12 = 0.433 ; b22 = 0.717 ; b32 = -0.030 ; b42 = 0.200 ; % second Gaussian coefficents
-b13 = 0.100 ; b23 = 1.000 ; b33 = 0.354 ;  b43 = 0.000 ; % third Gaussian coefficents
+% b11 = 0.815 ; b21 = 1.055 ; b31 = 0.162 ;  b41 = 0.063 ; % first Gaussian coefficents
+% b12 = 0.433 ; b22 = 0.717 ; b32 = -0.030 ; b42 = 0.200 ; % second Gaussian coefficents
+% b13 = 0.100 ; b23 = 1.000 ; b33 = 0.354 ;  b43 = 0.000 ; % third Gaussian coefficents
+% 
+% normalizedMuscleActiveForceLength = (b11 .* exp((-0.5.* (normalizedFiberLength - b21).^2)./ (b31 + b41 .* normalizedFiberLength))) + ...
+%     (b12 .* exp((-0.5.* (normalizedFiberLength - b22).^2)./ (b32 + b42 .* normalizedFiberLength))) + ...
+%     (b13 .* exp((-0.5.* (normalizedFiberLength - b23).^2)./ (b33 + b43 .* normalizedFiberLength))) ;
 
-normalizedMuscleActiveForceLength = (b11 .* exp((-0.5.* (normalizedFiberLength - b21).^2)./ (b31 + b41 .* normalizedFiberLength))) + ...
-    (b12 .* exp((-0.5.* (normalizedFiberLength - b22).^2)./ (b32 + b42 .* normalizedFiberLength))) + ...
-    (b13 .* exp((-0.5.* (normalizedFiberLength - b23).^2)./ (b33 + b43 .* normalizedFiberLength))) ;
+[normalizedMuscleActiveForceLength] = MuscleForceLengthCSI(normalizedFiberLength,nMuscles);
 
 MuscleActiveForceLength = normalizedMuscleActiveForceLength .* maximalIsometricForce ; 
 
-MuscleActiveForceLength_f =@(normalizedFiberLength, maximalIsometricForce,a) ((b11 .* exp((-0.5.* (normalizedFiberLength - b21).^2)./ (b31 + b41 .* normalizedFiberLength))) + ...
-    (b12 .* exp((-0.5.* (normalizedFiberLength - b22).^2)./ (b32 + b42 .* normalizedFiberLength))) + ...
-    (b13 .* exp((-0.5.* (normalizedFiberLength - b23).^2)./ (b33 + b43 .* normalizedFiberLength)))) .* maximalIsometricForce .*a ;
-
 
 % Passive muscle force-length (S3)
+
 kpe = 4.0 ; e0 = 0.6 ;
-normalizedMusclePassiveForce = (exp(((kpe .* (normalizedFiberLength - 1))./e0)) - 1)./ (exp(kpe) - 1) ;
+normalizedMusclePassiveForcePart1 = normalizedFiberLength * 0 ;
+normalizedMusclePassiveForcePart2 = (exp(((kpe .* (normalizedFiberLength - 1))./e0)) - 1)./ (exp(kpe) - 1) ;
+normalizedMusclePassiveForce = normalizedMusclePassiveForcePart1 + if_else(normalizedFiberLength < 1, 0, normalizedMusclePassiveForcePart2); % if normalized length under 0 the force = 0 
 
 musclePassiveForce = normalizedMusclePassiveForce .* maximalIsometricForce ; 
-musclePassiveForce_f = @(normalizedFiberLength, maximalIsometricForce) (exp(((kpe .* (normalizedFiberLength - 1))./e0)) - 1)./ (exp(kpe) - 1) .* maximalIsometricForce ; 
+
 
 
 % Muscle force-velocity (S4)
@@ -271,7 +275,6 @@ all_states = vertcat(musculoskeletal_states, muscle_tendon_states);
 getTendonForce = Function('getTendonForce', ...
     {all_states, muscleTendonParameters}, {tendonForce}, ...
     {'all_states','muscle_tendon_parameters'}, {'tendon_force'}) ;
-
 
 getMuscleForce = Function('getMuscleForce', ...
     {all_states, muscleTendonParameters}, {muscleForce}, ...
@@ -294,12 +297,12 @@ getMuscleActiveForce = Function('getMuscleActiveForce', ...
     {'all_states','muscle_tendon_parameters'}, {'MuscleActiveForce'}) ;
 
 normalizeTendonLength = Function('normalizeTendonLength', ...
-    {tendonLengthening, muscleTendonParameters}, {normalizedTendonLength}, ...
-    {'tendonLengthening','muscle_tendon_parameters'}, {'length_tendon'});
+    {all_states, muscleTendonParameters}, {normalizedTendonLength}, ...
+    {'all_states','muscle_tendon_parameters'}, {'length_tendon'});
 
 normalizeFiberLength = Function('normalizeFiberLength', ...
-    {fiberLength, muscleTendonParameters}, {normalizedFiberLength}, ...
-    {'fiberLength','muscleTendonParameters'}, {'normalizeFiberLength'});
+    {all_states, muscleTendonParameters}, {normalizedFiberLength}, ...
+    {'all_states','muscle_tendon_parameters'}, {'normalizeFiberLength'});
 
 
 % TODO: not sure these functions are relevant [MB] according to me, those
@@ -347,4 +350,18 @@ equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','newton',g, opts)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 unknown_parameters = horzcat(optimalFiberLength,phi0,maximalIsometricForce,tendonSlackLength) ;
-%%
+
+
+%% struct that stock casadi function 
+casadiFun = struct('ForwardKinematics',ForwardKinematics,...
+    'getUMTLength', getUMTLength,...
+    'getMomentArm', getMomentArm,...
+    'getTendonForce', getTendonForce, ...
+    'getMuscleForce', getMuscleForce,...
+    'getPennationAngle', getPennationAngle,...
+    'getMusclePassiveForce',getMusclePassiveForce,...
+    'getMuscleActiveForce', getMuscleActiveForce,...
+    'normalizeTendonForce', normalizeTendonForce,...
+    'normalizeTendonLength',normalizeTendonLength,...
+    'normalizeFiberLength', normalizeFiberLength);
+ 
