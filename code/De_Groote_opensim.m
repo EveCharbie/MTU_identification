@@ -88,10 +88,13 @@ CALC = R_0_calc(1:3, 4);  %calcaneum
 % Muscle insertions in local frame
 Local_Insertion_tibialis_anterior = SX.sym('Local_Insertion_tibialis_anterior',3);
 Local_Origin_tibialis_anterior = SX.sym('Local_Origin_tibialis_anterior',3);
+Local_ViaPoint_tibialis_anterior = SX.sym('Local_Insertion_tibialis_anterior',3);
+
 Local_Insertion_soleus = SX.sym('Local_Insertion_soleus',3);
 Local_Origin_soleus = SX.sym('Local_Origin_soleus',3);
 Local_Insertion_gastrocnemius = SX.sym('Local_Insertion_gastrocnemius',3);
 Local_Origin_gastrocnemius = SX.sym('Local_Origin_gastrocnemius',3);
+
 muscle_insertion = vertcat( ...
     Local_Origin_tibialis_anterior, ...
     Local_Origin_soleus, ...
@@ -100,13 +103,15 @@ muscle_insertion = vertcat( ...
     Local_Insertion_soleus, ...
     Local_Insertion_gastrocnemius );
 
-known_parameters = vertcat(segment_geometry, muscle_insertion);
+known_parameters = vertcat(segment_geometry, muscle_insertion,Local_ViaPoint_tibialis_anterior);
 
     %% Muscle origins and insertion in R0
     %%%%%%%%%%%%%
 
-    Origin_tibialis_anterior = Rototranslate(R_0_leg, Local_Origin_tibialis_anterior);  
+Origin_tibialis_anterior = Rototranslate(R_0_leg, Local_Origin_tibialis_anterior);  
 Insertion_tibialis_anterior = Rototranslate(R_0_calc, Local_Insertion_tibialis_anterior);
+ViaPoint_tibialis_anterior = Rototranslate(R_0_leg, Local_ViaPoint_tibialis_anterior);
+
 Origin_soleus = Rototranslate(R_0_leg,  Local_Origin_soleus) ;
 Insertion_soleus = Rototranslate(R_0_calc, Local_Insertion_soleus);
 Origin_gastrocnemius = Rototranslate(R_0_thigh, Local_Origin_gastrocnemius) ;
@@ -114,6 +119,7 @@ Insertion_gastrocnemius = Rototranslate(R_0_calc, Local_Insertion_gastrocnemius)
 
 Origin = horzcat(Origin_tibialis_anterior, Origin_soleus, Origin_gastrocnemius);
 Insertion = horzcat(Insertion_tibialis_anterior, Insertion_soleus, Insertion_gastrocnemius);
+ViaPoint = horzcat(ViaPoint_tibialis_anterior) ; 
 Markers = horzcat(HJC, KJC, AJC, TJC,CALC); 
 
 %% 3. Functions about model geometry/kinematics
@@ -121,10 +127,14 @@ Markers = horzcat(HJC, KJC, AJC, TJC,CALC);
 musculoskeletal_states = vertcat(q, known_parameters) ; % all parameters of musculoskeletal model 
 
 ForwardKinematics = Function('ForwardKinematics', ...
-    {q, known_parameters}, {Origin, Insertion, Markers}, ...
-    {'q', 'known_parameters'}, {'Origin', 'Insertion', 'Markers'}) ;
+    {q, known_parameters}, {Origin, Insertion,ViaPoint, Markers}, ...
+    {'q', 'known_parameters'}, {'Origin', 'Insertion','ViaPoint', 'Markers'}) ;
 
-umtLength = sqrt(sum((Insertion - Origin).^2))';
+% umtLength = sqrt(sum((Insertion - Origin).^2))';
+umtLength = vertcat( sqrt(sum((Insertion(:,1) - ViaPoint(:,1)).^2)) + sqrt(sum((ViaPoint(:,1) - Origin(:,1)).^2)),... % Tibialis
+    sqrt(sum((Insertion(:,2) - Origin(:,2)).^2)),... % Soleus
+    sqrt(sum((Insertion(:,3) - Origin(:,3)).^2))) ; % Gast 
+
 momentArm = jacobian(umtLength, q);
 
 getUMTLength = Function('UMTLength', ...
@@ -262,6 +272,7 @@ getTendonForce = Function('getTendonForce', ...
     {all_states, muscleTendonParameters}, {tendonForce}, ...
     {'all_states','muscle_tendon_parameters'}, {'tendon_force'}) ;
 
+
 getMuscleForce = Function('getMuscleForce', ...
     {all_states, muscleTendonParameters}, {muscleForce}, ...
     {'all_states','muscle_tendon_parameters'}, {'muscle_force'}) ;
@@ -282,16 +293,17 @@ getMuscleActiveForce = Function('getMuscleActiveForce', ...
     {all_states, muscleTendonParameters}, {MuscleActiveForceLength}, ...
     {'all_states','muscle_tendon_parameters'}, {'MuscleActiveForce'}) ;
 
+normalizeTendonLength = Function('normalizeTendonLength', ...
+    {tendonLengthening, muscleTendonParameters}, {normalizedTendonLength}, ...
+    {'tendonLengthening','muscle_tendon_parameters'}, {'length_tendon'});
+
+normalizeFiberLength = Function('normalizeFiberLength', ...
+    {fiberLength, muscleTendonParameters}, {normalizedFiberLength}, ...
+    {'fiberLength','muscleTendonParameters'}, {'normalizeFiberLength'});
 
 
-% TODO: not sure these functions are relevant [MB]
-% normalizeTendonLength = Function('normalizeTendonLength', ...
-%     {tendonLength, muscleTendonParameters}, {normalizedTendonLength}, ...
-%     {'length_tendon_normalized','muscle_tendon_parameters'}, {'length_tendon'});
-% 
-% normalizeFiberLength = Function('normalizeFiberLength', ...
-%     {FiberLength, muscleTendonParameters}, {normalizedFiberLength}, ...
-%     {'FiberLength','muscleTendonParameters'}, {'normalizeFiberLength'});
+% TODO: not sure these functions are relevant [MB] according to me, those
+% are not [AM]
 % 
 % getNormalizeMusclePassiveForce = Function('Normalized_Muscle_Passive_Force_Length', ...
 %     {states, known_parameters}, {normalizedMusclePassiveForce}, ...
