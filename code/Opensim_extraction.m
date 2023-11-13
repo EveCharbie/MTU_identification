@@ -252,10 +252,33 @@ for i =  Index
             end
         end
     end
-
+end
 
     %% output of our model
     try
+            % gast : sum of lat_gas_r and med_gas_r
+                %insertion 
+            insertion.gast_P1.X = mean([insertion.med_gas_r_P1.X, insertion.lat_gas_r_P1.X]) ;
+            insertion.gast_P1.Y = mean([insertion.med_gas_r_P1.Y, insertion.lat_gas_r_P1.Y]) ;
+            insertion.gast_P1.Z = mean([insertion.med_gas_r_P1.Z, insertion.lat_gas_r_P1.Z]) ; 
+            insertion.gast_P1.parent = insertion.med_gas_r_P1.parent ; 
+
+            insertion.gast_P3.X = mean([insertion.med_gas_r_P3.X, insertion.lat_gas_r_P3.X]) ;
+            insertion.gast_P3.Y = mean([insertion.med_gas_r_P3.Y, insertion.lat_gas_r_P3.Y]) ;
+            insertion.gast_P3.Z = mean([insertion.med_gas_r_P3.Z, insertion.lat_gas_r_P3.Z]) ; 
+            insertion.gast_P3.parent = insertion.med_gas_r_P3.parent ; 
+
+                %parameters : F0m --> sum ; L0m --> mean ; phi0 --> mean , tsl --> mean 
+            
+           parameters.gast.optimal_fiber_length = mean([parameters.med_gas_r.optimal_fiber_length, ... 
+               parameters.lat_gas_r.optimal_fiber_length]) ; 
+           parameters.gast.pennation_angle_at_optimal = mean([parameters.med_gas_r.pennation_angle_at_optimal, ...
+               parameters.lat_gas_r.pennation_angle_at_optimal]) ;
+           parameters.gast.max_isometric_force = sum([parameters.med_gas_r.max_isometric_force, ... 
+               parameters.lat_gas_r.max_isometric_force]) ; 
+           parameters.gast.tendon_slack_length = mean([parameters.med_gas_r.tendon_slack_length, ... 
+               parameters.lat_gas_r.tendon_slack_length]) ; 
+
         % known_parameters_num = [segment_geometry_num; muscle_origin; muscle_insersion];
             %segment_geometry_num = [thigh_0, thigh_1, thigh_2, leg_0, leg_1, leg_2, talus_0, talus_1, talus_2, foot_0, foot_1, foot_2]
             segment_geometry_num = [joint.knee_r.X, joint.knee_r.Y, 0,...
@@ -266,11 +289,11 @@ for i =  Index
 %             muscle_origin = [Local_Origin_tibialis_anterior_0, Local_Origin_tibialis_anterior_1, Local_Origin_tibialis_anterior_2, Local_Origin_soleus_0, Local_Origin_soleus_1, Local_Origin_soleus_2, Local_Origin_gastrocnemius_0, Local_Origin_gastrocnemius_1, Local_Origin_gastrocnemius_2, Local_Insertion_tibialis_anterior_0, Local_Insertion_tibialis_anterior_1, Local_Insertion_tibialis_anterior_2, Local_Insertion_soleus_0, Local_Insertion_soleus_1, Local_Insertion_soleus_2, Local_Insertion_gastrocnemius_0, Local_Insertion_gastrocnemius_1, Local_Insertion_gastrocnemius_2] ;
             muscle_origin = [insertion.tib_ant_r_P1.X, insertion.tib_ant_r_P1.Y, 0, ...
                 insertion.soleus_r_P1.X, insertion.soleus_r_P1.Y, 0, ...
-                insertion.lat_gas_r_P1.X, insertion.lat_gas_r_P1.Y, 0] ; % OK
+                insertion.gast_P1.X, insertion.gast_P1.Y, 0] ; % OK
 
             muscle_insersion = [insertion.tib_ant_r_P3.X, insertion.tib_ant_r_P3.Y, 0, ...
                 insertion.soleus_r_P2.X, insertion.soleus_r_P2.Y, 0, ...
-                insertion.lat_gas_r_P3.X, insertion.lat_gas_r_P3.Y, 0] ; 
+                insertion.gast_P3.X, insertion.gast_P3.Y, 0] ; 
 
             muscle_viaPoint = [insertion.tib_ant_r_P2.X, insertion.tib_ant_r_P2.Y, 0] ;
 
@@ -279,18 +302,31 @@ known_parameters_num = [segment_geometry_num, muscle_origin, muscle_insersion, m
         % muscle_tendon_parameters_num =  [l0m_num , phi0_num , f0m_num , lst_num ] ;
             l0m_num = [parameters.tib_ant_r.optimal_fiber_length,...
                 parameters.soleus_r.optimal_fiber_length,...
-                parameters.med_gas_r.optimal_fiber_length ] ;  
+                parameters.gast.optimal_fiber_length ] ;  
             phi0_num = [parameters.tib_ant_r.pennation_angle_at_optimal,...
                 parameters.soleus_r.pennation_angle_at_optimal,...
-                parameters.med_gas_r.pennation_angle_at_optimal ] ;  
+                parameters.gast.pennation_angle_at_optimal ] ;  
             f0m_num = [parameters.tib_ant_r.max_isometric_force,...
                 parameters.soleus_r.max_isometric_force,...
-                parameters.med_gas_r.max_isometric_force ] ; 
+                parameters.gast.max_isometric_force ] ; 
             lst_num =  [parameters.tib_ant_r.tendon_slack_length,...
                 parameters.soleus_r.tendon_slack_length,...
-                parameters.med_gas_r.tendon_slack_length ] ; 
+                parameters.gast.tendon_slack_length ] ; 
 
-muscle_tendon_parameters_num =  [l0m_num , phi0_num , f0m_num , lst_num ] ;    
+muscle_tendon_parameters_num =  [l0m_num , phi0_num , f0m_num , lst_num ] ;  
+
+fprintf(['Optimal fiber length (l0m) [Tibialis Anterior, Soleus, Gastrocnemius]','\n '])
+fprintf([num2str(l0m_num),'\n'])
+
+fprintf(['Pennation angle at optimal fiber length (phi0) [Tibialis Anterior, Soleus, Gastrocnemius] ','\n '])
+fprintf([num2str(phi0_num),'\n'])
+
+fprintf(['Maximal fiber force (f0m) [Tibialis Anterior, Soleus, Gastrocnemius]','\n '])
+fprintf([num2str(f0m_num),'\n'])
+
+fprintf(['tendon slack length (lst) [Tibialis Anterior, Soleus, Gastrocnemius]','\n '])
+fprintf([num2str(lst_num),'\n'])
+
     catch
         known_parameters_num = zeros(1,33) ; 
         muscle_tendon_parameters_num = zeros(1,33) ; 
