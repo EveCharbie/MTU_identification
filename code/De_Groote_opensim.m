@@ -1,15 +1,11 @@
-%% Musculo skeletical model (Opensim equivalent)
-
-try 
-addpath('/Users/mickaelbegon/Downloads/casadi-3.6.3-osx64-matlab2018b/')
-catch 
-
+%% Musculo skeletical model (Opensim equivalent)P2
+[ret, name] = system('hostname');
+if strcmp(name, '942-27984') 
+    addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
+elseif strcmp(name, 'xxx') 
+    addpath('/Users/mickaelbegon/Downloads/casadi-3.6.3-osx64-matlab2018b/')
 end
-try
- addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
-catch
-
-end 
+%    addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
 
 import casadi.*
 
@@ -72,23 +68,26 @@ R_thigh_leg = Rototranslation_Rz(thigh(1),thigh(2),thigh(3), -theta_knee);
 R_leg_talus = Rototranslation_Rz(leg(1),leg(2),leg(3), -theta_ankle );
 R_talus_calc = Rototranslation_Rz(talus(1),talus(2),talus(3), 0 );
 
-R_0_leg = R_0_thigh * R_thigh_leg ; 
-R_0_talus = R_0_leg * R_leg_talus ; 
-R_0_calc = R_0_talus * R_talus_calc ; 
+R_0_leg = R_0_thigh * R_thigh_leg; 
+R_0_talus = R_0_leg * R_leg_talus; 
+R_0_calc = R_0_talus * R_talus_calc; 
+
+
+
 
     %% Joint center
     %%%%%%%%%%%%%
 
-HJC = R_0_thigh(1:3, 4); % Hip
-KJC = R_0_leg(1:3, 4); % Knee
-AJC = R_0_talus(1:3, 4); % Knee
-TJC = Rototranslate(R_0_calc, clac) ; % toe
-CALC = R_0_calc(1:3, 4);  %calcaneum
+% HJC = R_0_thigh(1:3, 4); % Hip
+% KJC = R_0_leg(1:3, 4); % Knee
+% AJC = R_0_talus(1:3, 4); % Knee
+% TJC = Rototranslate(R_0_calc, clac) ; % toe
+% CALC = R_0_calc(1:3, 4);  %calcaneum
 
 % Muscle insertions in local frame
 Local_Insertion_tibialis_anterior = SX.sym('Local_Insertion_tibialis_anterior',3);
 Local_Origin_tibialis_anterior = SX.sym('Local_Origin_tibialis_anterior',3);
-Local_ViaPoint_tibialis_anterior = SX.sym('Local_Insertion_tibialis_anterior',3);
+Local_ViaPoint_tibialis_anterior = SX.sym('Local_ViaPoint_tibialis_anterior',3);
 
 Local_Insertion_soleus = SX.sym('Local_Insertion_soleus',3);
 Local_Origin_soleus = SX.sym('Local_Origin_soleus',3);
@@ -101,39 +100,83 @@ muscle_insertion = vertcat( ...
     Local_Origin_gastrocnemius, ...
     Local_Insertion_tibialis_anterior, ...
     Local_Insertion_soleus, ...
-    Local_Insertion_gastrocnemius );
+    Local_Insertion_gastrocnemius ); %TODO: add viapoint
 
-known_parameters = vertcat(segment_geometry, muscle_insertion,Local_ViaPoint_tibialis_anterior);
+known_parameters = vertcat(segment_geometry, muscle_insertion, Local_ViaPoint_tibialis_anterior);
 
     %% Muscle origins and insertion in R0
     %%%%%%%%%%%%%
 
-Origin_tibialis_anterior = Rototranslate(R_0_leg, Local_Origin_tibialis_anterior);  
-Insertion_tibialis_anterior = Rototranslate(R_0_calc, Local_Insertion_tibialis_anterior);
-ViaPoint_tibialis_anterior = Rototranslate(R_0_leg, Local_ViaPoint_tibialis_anterior);
+% Origin_tibialis_anterior = Rototranslate(R_0_leg, Local_Origin_tibialis_anterior);  
+% Insertion_tibialis_anterior = Rototranslate(R_0_calc, Local_Insertion_tibialis_anterior);
+% ViaPoint_tibialis_anterior = Rototranslate(R_0_leg, Local_ViaPoint_tibialis_anterior);
+% 
+% Origin_soleus = Rototranslate(R_0_leg,  Local_Origin_soleus) ;
+% Insertion_soleus = Rototranslate(R_0_calc, Local_Insertion_soleus);
+% 
+% Origin_gastrocnemius = Rototranslate(R_0_thigh, Local_Origin_gastrocnemius) ;
+% Insertion_gastrocnemius = Rototranslate(R_0_calc, Local_Insertion_gastrocnemius) ;
+% 
+% Origin = horzcat(Origin_tibialis_anterior, Origin_soleus, Origin_gastrocnemius);
+% Insertion = horzcat(Insertion_tibialis_anterior, Insertion_soleus, Insertion_gastrocnemius);
+% ViaPoint = horzcat(ViaPoint_tibialis_anterior) ; 
+% Markers = horzcat(HJC, KJC, AJC, TJC,CALC); 
 
-Origin_soleus = Rototranslate(R_0_leg,  Local_Origin_soleus) ;
-Insertion_soleus = Rototranslate(R_0_calc, Local_Insertion_soleus);
-Origin_gastrocnemius = Rototranslate(R_0_thigh, Local_Origin_gastrocnemius) ;
-Insertion_gastrocnemius = Rototranslate(R_0_calc, Local_Insertion_gastrocnemius) ;
+    %% Muscle origins and insertion in thigh
+    %%%%%%%%%%%%%
+
+    % rototranslation matrix 
+% R_thigh_leg = Rototranslation_Rz(thigh(1),thigh(2),thigh(3), -theta_knee);
+% R_leg_talus = Rototranslation_Rz(leg(1),leg(2),leg(3), -theta_ankle );
+% R_talus_calc = Rototranslation_Rz(talus(1),talus(2),talus(3), 0 );
+R_thigh_talus = R_thigh_leg * R_leg_talus; 
+R_thigh_calc = R_thigh_talus * R_talus_calc; 
+
+    % joint center 
+HJC = [0; 0; 0]; % Hip
+KJC = R_thigh_leg(1:3, 4); % Knee
+AJC = R_thigh_talus(1:3, 4); % Ankle
+TJC = Rototranslate(R_thigh_calc, clac) ; % toe
+CALC = R_thigh_calc(1:3, 4);  %calcaneum
+
+    % insertion origine muscle 
+Origin_tibialis_anterior = Rototranslate(R_thigh_leg, Local_Origin_tibialis_anterior);  
+Insertion_tibialis_anterior = Rototranslate(R_thigh_calc, Local_Insertion_tibialis_anterior);
+ViaPoint_tibialis_anterior = Rototranslate(R_thigh_leg, Local_ViaPoint_tibialis_anterior);
+
+Origin_soleus = Rototranslate(R_thigh_leg,  Local_Origin_soleus) ;
+Insertion_soleus = Rototranslate(R_thigh_calc, Local_Insertion_soleus);
+
+Origin_gastrocnemius = Local_Origin_gastrocnemius;
+Insertion_gastrocnemius = Rototranslate(R_thigh_calc, Local_Insertion_gastrocnemius) ;
 
 Origin = horzcat(Origin_tibialis_anterior, Origin_soleus, Origin_gastrocnemius);
 Insertion = horzcat(Insertion_tibialis_anterior, Insertion_soleus, Insertion_gastrocnemius);
 ViaPoint = horzcat(ViaPoint_tibialis_anterior) ; 
 Markers = horzcat(HJC, KJC, AJC, TJC,CALC); 
 
+
+
+
 %% 3. Functions about model geometry/kinematics
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 musculoskeletal_states = vertcat(q, known_parameters) ; % all parameters of musculoskeletal model 
 
 ForwardKinematics = Function('ForwardKinematics', ...
-    {q, known_parameters}, {Origin, Insertion,ViaPoint, Markers}, ...
-    {'q', 'known_parameters'}, {'Origin', 'Insertion','ViaPoint', 'Markers'}) ;
+    {q, known_parameters}, {Origin, Insertion, ViaPoint, Markers}, ...
+    {'q', 'known_parameters'}, {'Origin', 'Insertion', 'ViaPoint', 'Markers'}) ;
 
 % umtLength = sqrt(sum((Insertion - Origin).^2))';
-umtLength = vertcat( sqrt(sum((Insertion(:,1) - ViaPoint(:,1)).^2)) + sqrt(sum((ViaPoint(:,1) - Origin(:,1)).^2)),... % Tibialis
-    sqrt(sum((Insertion(:,2) - Origin(:,2)).^2)),... % Soleus
-    sqrt(sum((Insertion(:,3) - Origin(:,3)).^2))) ; % Gast 
+% umtLength = vertcat(norm(Insertion_tibialis_anterior - ViaPoint_tibialis_anterior, 1) + ...
+%                     norm(ViaPoint_tibialis_anterior - Origin_tibialis_anterior, 1), .... % Tibialis
+%                     norm(Insertion_soleus - Origin_soleus, 1),... % Soleus
+%                     norm(Insertion_gastrocnemius - Origin_gastrocnemius, 1)) ; % Gast 
+
+umtLength = vertcat( sqrt(sum((Insertion_tibialis_anterior - ViaPoint_tibialis_anterior).^2)) + ...
+                     sqrt(sum((ViaPoint_tibialis_anterior - Origin_tibialis_anterior).^2)) , ... % Tibialis
+                     sqrt(sum((Insertion_soleus - Origin_soleus).^2)) , ... % Soleus
+                     sqrt(sum((Insertion_gastrocnemius - Origin_gastrocnemius).^2)) ) ; % Gast
+
 
 momentArm = jacobian(umtLength, q);
 
@@ -144,8 +187,10 @@ getMomentArm = Function('MomentArm', ...
     {q, known_parameters}, {momentArm}, ...
     {'q', 'known_parameters'}, {'moment_arm'});
 
-
-
+tibiaLength = vertcat(sqrt(sum((KJC - AJC).^2))) ; % Gast 
+getTIBIALength = Function('getTIBIALength', ...
+    {q, known_parameters}, {tibiaLength}, ...
+    {'q', 'known_parameters'}, {'umt_length'});
                         %% Muscle-tendon equations
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% 1. Activation Dynamics (Not use yet) 
@@ -225,7 +270,8 @@ kT = 35; c1 = 0.200; c2 = 0.995; c3 = 0.250; % tendon parameters
 
 normalizedTendonForcePart1 = normalizedTendonLength * 0 ;
 normalizedTendonForcePart2 = c1 .* exp(kT .* (normalizedTendonLength - c2)) - c3; 
-normalizedTendonForce = normalizedTendonForcePart1 + if_else(normalizedTendonLength < 1, 0, normalizedTendonForcePart2); % if normalized length under 0 the force = 0 
+normalizedTendonForce = normalizedTendonForcePart2 ; 
+% normalizedTendonForce = normalizedTendonForcePart1 + if_else(normalizedTendonLength < 1, 0, normalizedTendonForcePart2); % if normalized length under 0 the force = 0 
 
 % normalizedTendonForce = c1 .* exp(kT .* (normalizedTendonLength - c2)) - c3; 
 tendonForce= normalizedTendonForce .* maximalIsometricForce ; 
@@ -234,18 +280,23 @@ tendonForce= normalizedTendonForce .* maximalIsometricForce ;
     %% Muscle Force Equations
     %%%%%%%%%%%%%
 % Active muscle force-length (S2)
-% b11 = 0.815 ; b21 = 1.055 ; b31 = 0.162 ;  b41 = 0.063 ; % first Gaussian coefficents
-% b12 = 0.433 ; b22 = 0.717 ; b32 = -0.030 ; b42 = 0.200 ; % second Gaussian coefficents
-% b13 = 0.100 ; b23 = 1.000 ; b33 = 0.354 ;  b43 = 0.000 ; % third Gaussian coefficents
-% 
-% normalizedMuscleActiveForceLength = (b11 .* exp((-0.5.* (normalizedFiberLength - b21).^2)./ (b31 + b41 .* normalizedFiberLength))) + ...
-%     (b12 .* exp((-0.5.* (normalizedFiberLength - b22).^2)./ (b32 + b42 .* normalizedFiberLength))) + ...
-%     (b13 .* exp((-0.5.* (normalizedFiberLength - b23).^2)./ (b33 + b43 .* normalizedFiberLength))) ;
+b11 = 0.814483478343008 ; b21 = 1.055033428970575 ; b31 = 0.162384573599574 ; b41 = 0.063303448465465 ; % first Gaussian coefficents
+b12 = 0.433004984392647 ; b22 = 0.716775413397760; b32 = -0.029947116970696 ; b42 = 0.200356847296188 ; % second Gaussian coefficents
+b13 = 0.100 ; b23 = 1.000 ; b33 = 0.5 * sqrt(0.5) ; b43 = 0.000 ; % third Gaussian coefficents
 
-[normalizedMuscleActiveForceLength] = MuscleForceLengthCSI(normalizedFiberLength,nMuscles);
+num3 = normalizedFiberLength - b23;
+den3 = b33 + b43 * normalizedFiberLength;
+FMtilde3 = b13 * exp(-0.5 * num3.^2 ./ den3.^2);
+num1 = normalizedFiberLength - b21;
+den1 = b31 + b41 * normalizedFiberLength;
+FMtilde1 = b11 * exp(-0.5 * num1.^2 ./ den1.^2);
+num2 = normalizedFiberLength - b22;
+den2 = b32 + b42 * normalizedFiberLength;
+FMtilde2 = b12 * exp(-0.5 * num2.^2 ./ den2.^2);
+
+normalizedMuscleActiveForceLength = FMtilde1 + FMtilde2 + FMtilde3;
 
 MuscleActiveForceLength = normalizedMuscleActiveForceLength .* maximalIsometricForce ; 
-
 
 % Passive muscle force-length (S3)
 
@@ -255,6 +306,8 @@ normalizedMusclePassiveForcePart2 = (exp(((kpe .* (normalizedFiberLength - 1))./
 normalizedMusclePassiveForce = normalizedMusclePassiveForcePart1 + if_else(normalizedFiberLength < 1, 0, normalizedMusclePassiveForcePart2); % if normalized length under 0 the force = 0 
 
 musclePassiveForce = normalizedMusclePassiveForce .* maximalIsometricForce ; 
+
+
 
 
 
@@ -305,21 +358,6 @@ normalizeFiberLength = Function('normalizeFiberLength', ...
     {'all_states','muscle_tendon_parameters'}, {'normalizeFiberLength'});
 
 
-% TODO: not sure these functions are relevant [MB] according to me, those
-% are not [AM]
-% 
-% getNormalizeMusclePassiveForce = Function('Normalized_Muscle_Passive_Force_Length', ...
-%     {states, known_parameters}, {normalizedMusclePassiveForce}, ...
-%     {'states','known_parameters'}, {'NormalizedMusclePassiveForceLength'});
-% 
-% getNormalizedMuscleActiveForceLength = Function('Normalized_Muscle_Active_Force_Length', ...
-%     {states,known_parameters}, {normalizedMuscleActiveForceLength}, ...
-%     {'states','known_parameters'}, {'NormalizedMuscleActiveForceLength'}) ;
-% 
-% getNormalizedMuscleForce = Function('getNormalizedMuscleForce', ...
-%     {states, known_parameters}, {normalizedMuscleForce}, ...
-%     {'states', 'known_parameters'}, {'normalizedMuscleForce'});
-
 %% Computing Joint Moments and Angles
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Moment articulaire Mj(θ, t) = ∑ i=1 m (ri(θ) ⋅ Fimt(θ, t))
@@ -342,7 +380,7 @@ p = vertcat(a,musculoskeletal_states , muscleTendonParameters) ;
 g = Function('g', {x, p}, {vertcat(g0, g1)},{'x', 'p'}, {'residuals'}); 
 
 opts = struct("constraints", ones(6,1)); % 1 means >= 0 
-equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','newton',g, opts) ; 
+equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','kinsol',g, opts) ; 
 
 
 
@@ -365,3 +403,53 @@ casadiFun = struct('ForwardKinematics',ForwardKinematics,...
     'normalizeTendonLength',normalizeTendonLength,...
     'normalizeFiberLength', normalizeFiberLength);
  
+
+
+
+% %% represnetation 
+% eval_func = Function('eval_func', ...
+%     {fiberLength(1), optimalFiberLength(1),maximalIsometricForce(1)}, {musclePassiveForce(1)}, ...
+%     {'fiberLength', 'optimalFiberLength','maximalIsometricForce'}, {'MusclePassiveForce'}) ;
+% 
+% % Generate x values in the desired range
+% x_values = linspace(0, 1.6, 100);
+% 
+% % Evaluate the function at the specified x values
+% 
+% y_values = zeros(size(x_values));
+% for i = 1:length(x_values)
+%     y_values(i) = full(eval_func(x_values(i),1,1));
+% end
+% 
+% % Plot the result
+% figure("Name","Sarcomere active force length relationship (Normalized")
+% plot(x_values, y_values);
+% xlabel('normalizedFiberLength');
+% ylabel('Muscle Passive Force');
+% xlim([0, 1.6]);
+% xlabel('Fiber length normalized ')
+% ylabel('Fiber force normalized ')
+% 
+% %% representation n2
+% eval_func2 = Function('eval_func2', ...
+%     {tendonSlackLength(1), tendonLengthening(1),maximalIsometricForce(1)}, {normalizedTendonForce(1)}, ...
+%     {'tendonSlackLength', 'tendonLengthening','maximalIsometricForce'}, {'MusclePassiveForce'}) ;
+% 
+% % Generate x values in the desired range
+% x_values = linspace(-.05,.05, 100);
+% 
+% % Evaluate the function at the specified x values
+% 
+% y_values = zeros(size(x_values));
+% for i = 1:length(x_values)
+%     y_values(i) = full(eval_func2(1,x_values(i),1));
+% end
+% 
+% % Plot the result
+% figure("Name","Sarcomere active force length relationship (Normalized")
+% plot(x_values+1, y_values);
+% xlabel('normalizedFiberLength');
+% ylabel('Muscle Passive Force');
+% xlim([0.95, 1.05]);
+% xlabel('Fiber length normalized ')
+% ylabel('Fiber force normalized ')
