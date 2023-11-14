@@ -1,81 +1,69 @@
 %% hypothetical data
-nTrials = 6 ;
-%Model_Opensim ; 
+% import model
 De_Groote_opensim ;
 
 [known_parameters_num,muscle_tendon_parameters_num] = Opensim_extraction() ;
 
-% passives triales systeme configuration (muscle activation and q's)
 
-rang_ankle = linspace(-30,20, 1000) ; % range ankle
-qankle = ones(nTrials, length(rang_ankle)) .* rang_ankle;
-a_ = zeros(6,3);
-% a_ = ones(6,3) .* .6 ; 
-%  a_(:,1) = zeros(6,1) ; 
-% a_(:,2:3) = zeros(6,2) ;
-qknee  = [0, 20, 40, 60, 80, 100];
+%% trials
+nTrials = 6 ;
 
-l0m = muscle_tendon_parameters_num(1:3) ; 
+results = {} ;
+headler = {'Torque','q1','q2',...
+    'activation_tibialis','activation_soleus','activation_gastrocnemius',...
+    'momentarm_tibialis','momentarm_soleus','momentarm_gastrocnemius',...
+    'UMT_tibialis','UMT_soleus','UMT_gastrocnemius',...
+    'fiber_tibialis','fiber_soleus','fiber_gastrocnemius',...
+    'phi_tibialis','phi_soleus','phi_gastrocnemius',...
+     'tendon_tibialis','tendon_soleus','tendon_gastrocnemius'} ;
 
-fig = figure('Name','Model kin ','Color',[1 1 1])
+% Musculo skeletical configuration during trial
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+qankle = linspace(-50,20, 100) ; 
+qknee = [0, 20, 40, 60, 80, 100] ;
+
+% input :  muscle activation and joint orientation  (random)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+a_num = [1, 1, 1];
+
 for i = 1 : nTrials
-    for ii = 1 :  length(rang_ankle)
-        %% input of root finder function
-        q_num = [0, 0 , 0, 0, (qknee(i)/180)*pi , (qankle(i,ii)/180)*pi ] ;
-
-        [muscle_origin_in0, muscle_insertion_in0,muscle_viaPoint_in0, joint_centers] = ForwardKinematics(q_num, known_parameters_num);
-
-        if mod(ii,10) == 1 % plot each 10 frames 
-            plotmodelkin(muscle_origin_in0, muscle_insertion_in0, joint_centers, fig)
-        end
-
-
-        umt_length = getUMTLength(q_num, known_parameters_num) ;
-        moment_arms = getMomentArm(q_num, known_parameters_num) ;
+    for ii = 1 :  length(qankle)
+        q_num = [0, 0 , 0, 0, (qknee(i)/180)*pi , (qankle(ii)/180)*pi ] ; %
         musculoskeletal_states_num = [q_num , known_parameters_num] ;
 
-        p_num = horzcat(a_(i,:),musculoskeletal_states_num , muscle_tendon_parameters_num) ;
+        p_num = horzcat(a_num,musculoskeletal_states_num , muscle_tendon_parameters_num) ;
 
-        %% root finder
-        x0 = [0 , 0 , 0 , l0m] ;  % tendonLengthening, fibre length   (TA SOL GAST)
-        try
-            x_num = equilibrateMuscleTendon(x0, p_num) ;
-        catch
-            x_num = nan(1,6) ;
-        end
-        checVector = full(x_num) ; 
+        x0 = [0.001, 0.001, 0.001 ,muscle_tendon_parameters_num(1:3)] ;  % tendonLengthening, fibre length   (TA SOL GAST)
+        x_num = equilibrateMuscleTendon(x0, p_num) ; % x find
+        
 
-        % test with the previus starting point
-        if sum(isnan(checVector)) ~= 0
-            x0 = [tendonLengthening_num, fiberLength_num] ;  % tendonLengthening, fibre length   (TA SOL GAST)
-            x_num = equilibrateMuscleTendon(x0, p_num) ;
-        end
+        %if sum(isnan(full(x_num)))== 0
+        tendonLengthening_num = x_num(1:nMuscles)';
+        fiberLength_num = x_num(nMuscles+1:end)';
+        all_states_num = [musculoskeletal_states_num,  fiberLength_num, tendonLengthening_num , a_num] ;
+        
 
+        temp = full(casadiFun.getJointMoment(all_states_num,muscle_tendon_parameters_num)) ; 
+        Torque = temp(end) ;                                           % torque
+        %Q1
+        %Q2
+        %Activation
+        temp = full(casadiFun.getMomentArm(q_num,known_parameters_num));
+        ma = temp(:,end)' ;                                                % moment arm
+        UMTlength_num = full(casadiFun.getUMTLength(q_num,known_parameters_num))' ; % UMT length
+        fLength_num = full(fiberLength_num) ;
+        phi_num = full(casadiFun.getPennationAngle(all_states_num,muscle_tendon_parameters_num))' ;
+        tendonlength_num = full(casadiFun.normalizeTendonLength(all_states_num,muscle_tendon_parameters_num))' .* muscle_tendon_parameters_num(10:12) ; 
 
-        try
-            tendonLengthening_num = x_num(1:nMuscles)';
-            fiberLength_num = x_num(nMuscles+1:end)';
+        Data(ii,:) = [Torque, qknee(i) , qankle(ii), a_num, ma,...
+            UMTlength_num, fLength_num, ...
+            phi_num, tendonlength_num] ; 
 
-            all_states_num = [musculoskeletal_states_num,  fiberLength_num, tendonLengthening_num , a_num] ;
-
-
-            Mtemp = full(getJointMoment(all_states_num,muscle_tendon_parameters_num)  );
-            FMtemp = full(getMusclePassiveForce(all_states_num,muscle_tendon_parameters_num)  );
-            Moment(i,ii) = double(Mtemp(end)); 
-            %FM_Sol(i,ii,:) = double(FMtemp); 
-
-        catch
-            Moment(i,ii) = nan(1) ;
-            %FM(i,ii) = nan(1) ;
-        end
     end
-
+        results{i} = Data ; 
+        nbnan(i) = sum(sum(isnan(Data))) ;
+        Data = [] ;
 end
-figure 
-plot(rang_ankle,Moment')
-text(-15, min(min(Moment)) - 0.1, 'dorsiflexion', 'HorizontalAlignment', 'center');
-text(15,  min(min(Moment)) , 'plantar flexion', 'HorizontalAlignment', 'center');
-
-
-
-
+fprintf('Number of nan for the trial :\n')
+fprintf(num2str(nbnan))
+fprintf('\n')
