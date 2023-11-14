@@ -5,7 +5,7 @@ if strcmp(name, '942-27984')
 elseif strcmp(name, 'xxx') 
     addpath('/Users/mickaelbegon/Downloads/casadi-3.6.3-osx64-matlab2018b/')
 end
-%    addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
+   addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
 
 import casadi.*
 
@@ -296,7 +296,7 @@ FMtilde2 = b12 * exp(-0.5 * num2.^2 ./ den2.^2);
 
 normalizedMuscleActiveForceLength = FMtilde1 + FMtilde2 + FMtilde3;
 
-MuscleActiveForceLength = normalizedMuscleActiveForceLength .* maximalIsometricForce ; 
+MuscleActiveForceLength = a .* normalizedMuscleActiveForceLength .* maximalIsometricForce ; 
 
 % Passive muscle force-length (S3)
 
@@ -380,14 +380,30 @@ p = vertcat(a,musculoskeletal_states , muscleTendonParameters) ;
 g = Function('g', {x, p}, {vertcat(g0, g1)},{'x', 'p'}, {'residuals'}); 
 
 opts = struct("constraints", ones(6,1)); % 1 means >= 0 
-equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','kinsol',g, opts) ; 
+%equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','kinsol',g, opts) ; 
 
 
+equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','newton',g, opts) ; 
 
 %% function d'optimisation
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 unknown_parameters = horzcat(optimalFiberLength,phi0,maximalIsometricForce,tendonSlackLength) ;
+
+
+%% representation function 
+representationMusclePassiveForce = Function('representationMusclePassiveForce', ...
+    {fiberLength(1), optimalFiberLength(1),maximalIsometricForce(1)}, {musclePassiveForce(1)}, ...
+    {'fiberLength', 'optimalFiberLength','maximalIsometricForce'}, {'MusclePassiveForce'}) ;
+
+representationMuscleActiveForceLength = Function('representationMuscleActiveForceLength', ...
+    {a(1),fiberLength(1), optimalFiberLength(1),maximalIsometricForce(1)}, {MuscleActiveForceLength(1)}, ...
+    {'a','fiberLength', 'optimalFiberLength','maximalIsometricForce'}, {'MuscleActiveForceLength'}) ;
+
+
+representationTendonForce = Function('representationTendonForce', ...
+    {tendonSlackLength(1), tendonLengthening(1),maximalIsometricForce(1)}, {tendonForce(1)}, ...
+    {'tendonSlackLength', 'tendonLengthening','maximalIsometricForce'}, {'tendonForce'}) ;
 
 
 %% struct that stock casadi function 
@@ -401,7 +417,10 @@ casadiFun = struct('ForwardKinematics',ForwardKinematics,...
     'getMuscleActiveForce', getMuscleActiveForce,...
     'normalizeTendonForce', normalizeTendonForce,...
     'normalizeTendonLength',normalizeTendonLength,...
-    'normalizeFiberLength', normalizeFiberLength);
+    'normalizeFiberLength', normalizeFiberLength, ...
+    'representationMusclePassiveForce', representationMusclePassiveForce, ...
+    'representationMuscleActiveForceLength', representationMuscleActiveForceLength, ...
+    'representationTendonForce', representationTendonForce);
  
 
 
