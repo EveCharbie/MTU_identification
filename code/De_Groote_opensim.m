@@ -5,10 +5,20 @@ if strcmp(name, '942-27984')
 elseif strcmp(name, 'xxx') 
     addpath('/Users/mickaelbegon/Downloads/casadi-3.6.3-osx64-matlab2018b/')
 end
-   %addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
+   addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
 
 import casadi.*
 
+                        %% Model definition 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% "a" is neuromuscular activation (between 0 and 1)
+% "q" is the spatial skeleton configuration (x, y, z, theta_hip, theta_knee, theta_ankle)
+% "knownparameter" is subject segment length and muscle insertion position
+% "musculoskeletal_states" = [q, known_parameter]
+% "neuromusculoskeletal_state" = [a, q, known_parameter]
+% "muscleTendonParameters" : musculoskeletal parameters that are generally assumed not to change: maximal isometric muscle force (Fom), optimal fiber length (ℓom), tendon slack length (ℓst), and pennation angle at optimal fiber length (φo).
+% "rootedvariables" = (tendonLengthening, fiberLength)
+% "all_state" = [neuromusculoskeletal_state, rootedvariables)
 
 
                         %% Musculoskeletal Geometry
@@ -48,7 +58,7 @@ theta_hip = SX.sym('theta_hip');
 theta_knee = SX.sym('theta_knee');
 theta_ankle = SX.sym('theta_ankle');
 
-q = vertcat(x,y,z,theta_hip, theta_knee, theta_ankle );
+q = vertcat(x,y,z,theta_hip, theta_knee, theta_ankle ); % skeleton configuration
 
     %% Model parameters that are personalized by scaling
     %%%%%%%%%%%%%
@@ -163,8 +173,8 @@ Markers = horzcat(HJC, KJC, AJC, TJC,CALC);
 musculoskeletal_states = vertcat(q, known_parameters) ; % all parameters of musculoskeletal model 
 
 ForwardKinematics = Function('ForwardKinematics', ...
-    {q, known_parameters}, {Origin, Insertion, ViaPoint, Markers}, ...
-    {'q', 'known_parameters'}, {'Origin', 'Insertion', 'ViaPoint', 'Markers'}) ;
+    {musculoskeletal_states}, {Origin, Insertion, ViaPoint, Markers}, ...
+    {'musculoskeletal_states'}, {'Origin', 'Insertion', 'ViaPoint', 'Markers'}) ;
 
 % umtLength = sqrt(sum((Insertion - Origin).^2))';
 % umtLength = vertcat(norm(Insertion_tibialis_anterior - ViaPoint_tibialis_anterior, 1) + ...
@@ -181,16 +191,16 @@ umtLength = vertcat( sqrt(sum((Insertion_tibialis_anterior - ViaPoint_tibialis_a
 momentArm = jacobian(umtLength, q);
 
 getUMTLength = Function('UMTLength', ...
-    {q, known_parameters}, {umtLength}, ...
-    {'q', 'known_parameters'}, {'umt_length'});
+    {musculoskeletal_states}, {umtLength}, ...
+    {'musculoskeletal_states'}, {'umt_length'});
 getMomentArm = Function('MomentArm', ...
-    {q, known_parameters}, {momentArm}, ...
-    {'q', 'known_parameters'}, {'moment_arm'});
+    {musculoskeletal_states}, {momentArm}, ...
+    {'musculoskeletal_states'}, {'moment_arm'});
 
 tibiaLength = vertcat(sqrt(sum((KJC - AJC).^2))) ; % Gast 
 getTIBIALength = Function('getTIBIALength', ...
-    {q, known_parameters}, {tibiaLength}, ...
-    {'q', 'known_parameters'}, {'umt_length'});
+    {musculoskeletal_states}, {tibiaLength}, ...
+    {'musculoskeletal_states'}, {'umt_length'});
                         %% Muscle-tendon equations
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% 1. Activation Dynamics (Not use yet) 
@@ -244,7 +254,8 @@ fiberLength = SX.sym('Fiber_length', nMuscles);
 tendonLengthening = SX.sym('Tendon_Lengthening', nMuscles);
 a = SX.sym('Muscle_Activation', nMuscles);
 
-muscle_tendon_states = vertcat(fiberLength, tendonLengthening, a);
+rootedvariables = vertcat(fiberLength, tendonLengthening);
+
 
     %% Muscle Tendon Architecture Equations
     %%%%%%%%%%%%%
@@ -323,7 +334,10 @@ normalizedMuscleForce = a .* normalizedMuscleActiveForceLength .* normalizedMusc
 muscleForce = normalizedMuscleForce .* maximalIsometricForce ; 
 
 %% Create all muscle-tendon functions
-all_states = vertcat(musculoskeletal_states, muscle_tendon_states);
+
+neuromusculoskeletal_state = vertcat(a, q, known_parameters) ; 
+
+all_states = vertcat(neuromusculoskeletal_state,rootedvariables);
 
 getTendonForce = Function('getTendonForce', ...
     {all_states, muscleTendonParameters}, {tendonForce}, ...
@@ -375,15 +389,15 @@ g1 = umtLength - (muscleLength + tendonLength);
 
 % g = Function('g',[tendonLength, FiberLength],[g0, g1]) ; 
 x = vertcat(tendonLengthening, fiberLength);
-p = vertcat(a,musculoskeletal_states , muscleTendonParameters) ;
+p = vertcat(neuromusculoskeletal_state , muscleTendonParameters) ;
 
-g = Function('g', {x, p}, {vertcat(g0, g1)},{'x', 'p'}, {'residuals'}); 
+gg = Function('g', {x, p}, {vertcat(g0, g1)},{'x', 'p'}, {'residuals'}); 
 
 opts = struct("constraints", ones(6,1)); % 1 means >= 0 
 %equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','kinsol',g, opts) ; 
 
 
-equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','newton',g, opts) ; 
+equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','newton',gg, opts) ; 
 
 %% function d'optimisation
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -423,53 +437,3 @@ casadiFun = struct('ForwardKinematics',ForwardKinematics,...
     'representationMuscleActiveForceLength', representationMuscleActiveForceLength, ...
     'representationTendonForce', representationTendonForce);
  
-
-
-
-% %% represnetation 
-% eval_func = Function('eval_func', ...
-%     {fiberLength(1), optimalFiberLength(1),maximalIsometricForce(1)}, {musclePassiveForce(1)}, ...
-%     {'fiberLength', 'optimalFiberLength','maximalIsometricForce'}, {'MusclePassiveForce'}) ;
-% 
-% % Generate x values in the desired range
-% x_values = linspace(0, 1.6, 100);
-% 
-% % Evaluate the function at the specified x values
-% 
-% y_values = zeros(size(x_values));
-% for i = 1:length(x_values)
-%     y_values(i) = full(eval_func(x_values(i),1,1));
-% end
-% 
-% % Plot the result
-% figure("Name","Sarcomere active force length relationship (Normalized")
-% plot(x_values, y_values);
-% xlabel('normalizedFiberLength');
-% ylabel('Muscle Passive Force');
-% xlim([0, 1.6]);
-% xlabel('Fiber length normalized ')
-% ylabel('Fiber force normalized ')
-% 
-% %% representation n2
-% eval_func2 = Function('eval_func2', ...
-%     {tendonSlackLength(1), tendonLengthening(1),maximalIsometricForce(1)}, {normalizedTendonForce(1)}, ...
-%     {'tendonSlackLength', 'tendonLengthening','maximalIsometricForce'}, {'MusclePassiveForce'}) ;
-% 
-% % Generate x values in the desired range
-% x_values = linspace(-.05,.05, 100);
-% 
-% % Evaluate the function at the specified x values
-% 
-% y_values = zeros(size(x_values));
-% for i = 1:length(x_values)
-%     y_values(i) = full(eval_func2(1,x_values(i),1));
-% end
-% 
-% % Plot the result
-% figure("Name","Sarcomere active force length relationship (Normalized")
-% plot(x_values+1, y_values);
-% xlabel('normalizedFiberLength');
-% ylabel('Muscle Passive Force');
-% xlim([0.95, 1.05]);
-% xlabel('Fiber length normalized ')
-% ylabel('Fiber force normalized ')
