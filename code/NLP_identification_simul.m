@@ -2,10 +2,9 @@
 [ret, name] = system('hostname');
 if strcmp(name, '942-27984')
     addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
-elseif strcmp(name, 'xxx')
+elseif strcmp(name(1:27), 'MacBook-Air-de-mickaelbegon')
     addpath('/Users/mickaelbegon/Downloads/casadi-3.6.3-osx64-matlab2018b/')
 end
-addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
 
 import casadi.*
 
@@ -22,21 +21,19 @@ w0 = []; % initial guess
 lbw = []; % lower bound of variable
 ubw = []; % upper bound of variable
 J = 0; % cost | objective function
-gg={}; % constraints
+g={}; % constraints
 lbg = []; % lower bound of constraints
 ubg = []; % upper bound of constraints
 
-UP = horzcat(unknown_parameters(:,1)',unknown_parameters(:,2)',...
-    unknown_parameters(:,3)',unknown_parameters(:,4)') ;
+UP = vertcat(unknown_parameters(:,1),unknown_parameters(:,2),...
+    unknown_parameters(:,3),unknown_parameters(:,4));
 
 % create muscle parameters variables
 w = { w{:}, UP};
-
 % we should find muscle_tendon_parameters_num
-% w0 =  [w0; muscle_tendon_parameters_num ]; %todo
-
-% w0 =  [w0; muscle_tendon_parameters_num + rand()*xxx]; %todo
-
+w0 =  [w0; muscle_tendon_parameters_num' ]; %TODO: add noise
+lbw = [lbw; muscle_tendon_parameters_num' * 0.5]; % lower bound of variable
+ubw = [ubw; muscle_tendon_parameters_num' * 2]; % upper bound of variable
 
 
 % header = header = {'Torque','q1','q2',...
@@ -49,68 +46,70 @@ w = { w{:}, UP};
 
 % Weightings in cost function
 W_torque = 1; % 1 Nm
-W_length = 0.005; %todo 1Nm correspond à 50 mm
-W_angle = (3/180) * pi;  % 1 Nm correspond à 3 deg
+W_length = 1;% / 0.005; %todo 1Nm correspond à 5 mm
+W_angle = 1;% / ((3/180) * pi);  % 1 Nm correspond à 3 deg
 
+eTorque = [];
+eFiber = [];
+ePennation = [];
 
-
-
-
-for trial = 1 % : ntrials % for 1 to nb trials
-
-    %  the bounds
-    w = { w{:}, UP};
-    w0 =  [w0; muscle_tendon_parameters_num ]; 
-    lbw = [lbw; muscle_tendon_parameters_num * 0.5]; % lower bound of variable
-    ubw = [ubw; muscle_tendon_parameters_num * 2]; % upper bound of variable
-    lbg = [lbg; zeros(1,6)]; % lower bound of constraints
-    ubg = [ubg; [0.05, 0.05, 0.05 ,muscle_tendon_parameters_num(1:3)*1.8]]; % upper bound of constraints
+for trial = 1:ntrials % for 1 to nb trials
+    data = Data(trial,:); % known variables 
 
     fiberLength_k = SX.sym(['Fiber_length_' num2str(trial)], nMuscles);
     tendonLengthening_k = SX.sym(['Tendon_Lengthening_' num2str(trial)], nMuscles);
-    x = vertcat((tendonLengthening_k),(fiberLength_k)) ; 
+    w = { w{:}, tendonLengthening_k, fiberLength_k};
+    w0 =  [w0; data(end-2:end)'; data(7:9)']; 
+%     w0 =  [w0; ones(3,1)*0.001; ones(3,1)*0.1]; 
+    lbw = [lbw; zeros(3,1); ones(3,1)*0.01]; % lower bound of variable
+    ubw = [ubw; ones(3,1)*0.5; ones(3,1)*.07];    
 
-    data = Data(trial,:);
 
-        % known variables 
     a_trial = data(4:6) ; % muscle activation during the trial
     q_trial = [0, 0, 0, 0, data(2:3)] ; % skeleton configuration during the trial
     musculoskeletal_states_trial = [q_trial, known_parameters_num ] ; % muscleskeleton configuration during the trial
     neuromusculoskeletal_states_trial = [a_trial, musculoskeletal_states_trial] ; % Neuromusculoskeletal states
+    p_trial = vertcat(neuromusculoskeletal_states_trial', UP) ;
 
 
-    %x0 = [0.001, 0.001, 0.001, w0(trial,1:3)] ;  % tendonLengthening, fibre length   (TA SOL GAST)
-    p_trial = horzcat(neuromusculoskeletal_states_trial, w{trial}) ;
-
-    umtLength = casadiFun.getUMTLength(musculoskeletal_states_trial) ; 
+    %OK: UP, equilibriumError, 
+    
     % constraints
+    constraints = casadiFun.equilibriumError( ...
+        vertcat(tendonLengthening_k, fiberLength_k), ...
+        p_trial);
 
-    [g0,g1]  =  muscletendonequation(a_trial,fiberLength_k,tendonLengthening_k,unknown_parameters,umtLength) ; 
+    g = { g{:}, constraints};
+    lbg = [lbg; zeros(6,1)]; % lower bound of constraints
+    ubg = [ubg; zeros(6,1)]; % upper bound of constraints
+    
+    all_states_trial = vertcat( ...
+        neuromusculoskeletal_states_trial', ...
+        tendonLengthening_k, ...
+        fiberLength_k ) ;
 
-    g = Function('g', {x, p}, {vertcat(g0,g1)},{'x', 'p'}, {'residuals'}) ;
-
-
-    contraints = g(x,p_trial);
-
-    tendonLengthening_trial = contraints(1:nMuscles)' ; 
-    fiberLength_trial = contraints(nMuscles+1:end)' ;
-
-    rootedvariables_trial = [fiberLength_trial ,tendonLengthening_trial] ;
-    all_states_trial = [neuromusculoskeletal_states_trial, rootedvariables_trial] ;
-
-    temp = casadiFun.getJointMoment(all_states_trial,  w{trial}) ;
+    temp = casadiFun.getJointMoment(all_states_trial,  UP) ;
     Torque_simulated = temp(end) ;
-    FiberLength_simulated = fiberLength_trial ;
-    phi_simulated = casadiFun.getPennationAngle(all_states_trial,w{trial})' ;
+    phi_simulated = casadiFun.getPennationAngle(all_states_trial, UP)' ;
 
     % objective
-     J = J + W_torque * (data(1) - Torque_simulated)^2; %add error on joint torque
-     J = J + W_length * sum((data(7:9) - FiberLength_simulated).^2);% add error on tendon length and pennation angle
-     J = J + W_angle * sum((data(10:12) - phi_simulated).^2);
+    eTorque = [eTorque; data(1) - Torque_simulated];
+    eFiber = [eFiber; data(7:9)' - fiberLength_k];
+    ePennation = [ePennation; data(10:12) - phi_simulated];
 
-     gg = { gg{:}, contraints};
-
+    J = J + W_torque * eTorque(trial)^2; %add error on joint torque
+    J = J + W_length * sum(eFiber(trial,:).^2);% add error on tendon length and pennation angle
+    J = J + W_angle * sum(ePennation(trial,:).^2);
 end
+
+w = vertcat(w{:});
+g = vertcat(g{:}); 
+
+costTorque = Function('costT', {w}, {eTorque});
+costFiber = Function('costF', {w}, {eFiber});
+costPennation = Function('costP', {w}, {ePennation});
+cost = Function('cost', {w}, {J});
+
 
 
 
@@ -119,7 +118,7 @@ end
 
 % nlp prob : 
 % "x" opt parameters, 'f' function to minimized, 'g' contraint function 
-prob = struct('x', [vertcat(w{1}),vertcat(x')], 'f', J , 'g',vertcat(gg{:})); 
+prob = struct('x', w, 'f', J , 'g',g); 
 
 solver = nlpsol('solver', 'ipopt', prob);
 

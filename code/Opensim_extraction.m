@@ -29,7 +29,7 @@ NameModelMuscles = 'Thelen2003Muscle'  ;
 
 
 CurrentFolder = cd ;
-nom_fichier = [CurrentFolder, '\wholebody.osim'] ;
+nom_fichier = [CurrentFolder, filesep, 'wholebody.osim'] ;
 
 
 % ====================================

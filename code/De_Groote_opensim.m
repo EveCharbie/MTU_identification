@@ -1,12 +1,10 @@
 %% Musculo skeletical model (Opensim equivalent)P2
 [ret, name] = system('hostname');
-if strcmp(name, '942-27984') 
+if strcmp(name, '942-27984')
     addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
-elseif strcmp(name, 'xxx') 
+elseif strcmp(name(1:27), 'MacBook-Air-de-mickaelbegon')
     addpath('/Users/mickaelbegon/Downloads/casadi-3.6.3-osx64-matlab2018b/')
 end
-   addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
-
 import casadi.*
 
                         %% Model definition 
@@ -265,11 +263,10 @@ rootedvariables = vertcat(fiberLength, tendonLengthening);
 % muscle length --> input in muscle tendon equilibrium => length tnendon =
 % length muscle = length fiber * cos(pennation angle) 
 
-
-pennationAngle =  asin(optimalFiberLength .*  sin(phi0) ./ fiberLength) ; % get pennation angle
-muscleLength = fiberLength .* cos(pennationAngle); 
-
 tendonLength = tendonSlackLength + tendonLengthening; %umtLength  - muscleLength; %TODO: safety if  tendonLength < tendonSlackLenght
+muscleLength = umtLength - tendonLength; %fiberLength .* cos(pennationAngle); 
+
+pennationAngle =  acos(muscleLength ./ fiberLength); %asin(optimalFiberLength .*  sin(phi0) ./ fiberLength) ; % get pennation angle
 
 normalizedTendonLength = tendonLength ./ tendonSlackLength; 
 normalizedFiberLength = fiberLength ./ optimalFiberLength; 
@@ -391,13 +388,13 @@ g1 = umtLength - (muscleLength + tendonLength);
 x = vertcat(tendonLengthening, fiberLength);
 p = vertcat(neuromusculoskeletal_state , muscleTendonParameters) ;
 
-gg = Function('g', {x, p}, {vertcat(g0, g1)},{'x', 'p'}, {'residuals'}); 
+equilibriumError = Function('equilibriumError', {x, p}, {vertcat(g0, g1)},{'x', 'p'}, {'residuals'}); 
 
 opts = struct("constraints", ones(6,1)); % 1 means >= 0 
 %equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','kinsol',g, opts) ; 
 
 
-equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','newton',gg, opts) ; 
+equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','newton',EquilibriumError, opts) ; 
 
 %% function d'optimisation
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -421,7 +418,9 @@ representationTendonForce = Function('representationTendonForce', ...
 
 
 %% struct that stock casadi function 
-casadiFun = struct('ForwardKinematics',ForwardKinematics,...
+casadiFun = struct( ...
+    'equilibriumError', equilibriumError,...
+    'ForwardKinematics',ForwardKinematics,...
     'getUMTLength', getUMTLength,...
     'getMomentArm', getMomentArm,...
     'getJointMoment',getJointMoment,...
