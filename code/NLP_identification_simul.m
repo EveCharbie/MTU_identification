@@ -54,8 +54,17 @@ eFiber = [];
 ePennation = [];
 
 for trial = 1:ntrials % for 1 to nb trials
-    data = Data(trial,:); % known variables 
 
+    % extract experimental input data
+    data = Data(trial,:); % known variables 
+    a_trial = data(4:6) ; % muscle activation during the trial
+    q_trial = [0, 0, 0, 0, data(2:3)] ; % skeleton configuration during the trial
+    musculoskeletal_states_trial = [q_trial, known_parameters_num ] ; % muscleskeleton configuration during the trial
+    neuromusculoskeletal_states_trial = [a_trial, musculoskeletal_states_trial] ; % Neuromusculoskeletal states
+    p_trial = vertcat(neuromusculoskeletal_states_trial', UP) ;
+    %OK: UP, equilibriumError, 
+
+    % define decision variables
     fiberLength_k = SX.sym(['Fiber_length_' num2str(trial)], nMuscles);
     tendonLengthening_k = SX.sym(['Tendon_Lengthening_' num2str(trial)], nMuscles);
     w = { w{:}, tendonLengthening_k, fiberLength_k};
@@ -64,16 +73,12 @@ for trial = 1:ntrials % for 1 to nb trials
     lbw = [lbw; zeros(3,1); ones(3,1)*0.01]; % lower bound of variable
     ubw = [ubw; ones(3,1)*0.5; ones(3,1)*.07];    
 
-
-    a_trial = data(4:6) ; % muscle activation during the trial
-    q_trial = [0, 0, 0, 0, data(2:3)] ; % skeleton configuration during the trial
-    musculoskeletal_states_trial = [q_trial, known_parameters_num ] ; % muscleskeleton configuration during the trial
-    neuromusculoskeletal_states_trial = [a_trial, musculoskeletal_states_trial] ; % Neuromusculoskeletal states
-    p_trial = vertcat(neuromusculoskeletal_states_trial', UP) ;
+    all_states_trial = vertcat( ...
+        neuromusculoskeletal_states_trial', ...
+        fiberLength_k, ...
+        tendonLengthening_k) ;    
 
 
-    %OK: UP, equilibriumError, 
-    
     % constraints
     constraints = casadiFun.equilibriumError( ...
         vertcat(tendonLengthening_k, fiberLength_k), ...
@@ -83,14 +88,11 @@ for trial = 1:ntrials % for 1 to nb trials
     lbg = [lbg; zeros(6,1)]; % lower bound of constraints
     ubg = [ubg; zeros(6,1)]; % upper bound of constraints
     
-    all_states_trial = vertcat( ...
-        neuromusculoskeletal_states_trial', ...
-        tendonLengthening_k, ...
-        fiberLength_k ) ;
+
 
     temp = casadiFun.getJointMoment(all_states_trial,  UP) ;
     Torque_simulated = temp(end) ;
-    phi_simulated = casadiFun.getPennationAngle(all_states_trial, UP)' ;
+    phi_simulated = casadiFun.getPennationAngle(all_states_trial, UP)' ; 
 
     % objective
     eTorque = [eTorque; data(1) - Torque_simulated];
@@ -128,5 +130,5 @@ sol = solver('x0', w0, 'lbx', lbw, 'ubx', ubw,...
     'lbg', lbg, 'ubg', ubg);
 w_opt = full(sol.x);
 
-param_opt = w_opt(1:nparam);
+param_opt = w_opt(1:length(UP));
 
