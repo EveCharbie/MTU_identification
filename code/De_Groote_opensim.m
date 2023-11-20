@@ -1,12 +1,11 @@
 %% Musculo skeletical model (Opensim equivalent)P2
 [ret, name] = system('hostname');
-if strcmp(name, '942-27984')
+if strcmp(name(1:9), '942-27984')
     addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
 elseif strcmp(name(1:27), 'MacBook-Air-de-mickaelbegon')
     addpath('/Users/mickaelbegon/Downloads/casadi-3.6.3-osx64-matlab2018b/')
 end
 import casadi.*
-
                         %% Model definition 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % "a" is neuromuscular activation (between 0 and 1)
@@ -185,7 +184,6 @@ umtLength = vertcat( sqrt(sum((Insertion_tibialis_anterior - ViaPoint_tibialis_a
                      sqrt(sum((Insertion_soleus - Origin_soleus).^2)) , ... % Soleus
                      sqrt(sum((Insertion_gastrocnemius - Origin_gastrocnemius).^2)) ) ; % Gast
 
-
 momentArm = jacobian(umtLength, q);
 
 getUMTLength = Function('UMTLength', ...
@@ -266,8 +264,6 @@ rootedvariables = vertcat(fiberLength, tendonLengthening);
 tendonLength = tendonSlackLength + tendonLengthening; %umtLength  - muscleLength; %TODO: safety if  tendonLength < tendonSlackLenght
 muscleLength = umtLength - tendonLength; %fiberLength .* cos(pennationAngle); 
 
-pennationAngle =  acos(muscleLength ./ fiberLength); %asin(optimalFiberLength .*  sin(phi0) ./ fiberLength) ; % get pennation angle
-
 normalizedTendonLength = tendonLength ./ tendonSlackLength; 
 normalizedFiberLength = fiberLength ./ optimalFiberLength; 
 
@@ -309,14 +305,14 @@ MuscleActiveForceLength = a .* normalizedMuscleActiveForceLength .* maximalIsome
 % Passive muscle force-length (S3)
 
 kpe = 4.0 ; e0 = 0.6 ;
-normalizedMusclePassiveForcePart1 = normalizedFiberLength * 0 ;
+% normalizedMusclePassiveForcePart1 = normalizedFiberLength * 0 ;
+normalizedMusclePassiveForcePart1 =  0 ;
 normalizedMusclePassiveForcePart2 = (exp(((kpe .* (normalizedFiberLength - 1))./e0)) - 1)./ (exp(kpe) - 1) ;
-normalizedMusclePassiveForce = normalizedMusclePassiveForcePart1 + if_else(normalizedFiberLength < 1, 0, normalizedMusclePassiveForcePart2); % if normalized length under 0 the force = 0 
-
+% normalizedMusclePassiveForce = normalizedMusclePassiveForcePart1 + if_else(normalizedFiberLength < 1, 0, normalizedMusclePassiveForcePart2); % if normalized length under 0 the force = 0 
+normalizedMusclePassiveForce = if_else(normalizedFiberLength < 1, ...
+    normalizedMusclePassiveForcePart1, ...
+    normalizedMusclePassiveForcePart2); % if normalized length under 0 the force = 0 
 musclePassiveForce = normalizedMusclePassiveForce .* maximalIsometricForce ; 
-
-
-
 
 
 % Muscle force-velocity (S4)
@@ -331,7 +327,6 @@ normalizedMuscleForce = a .* normalizedMuscleActiveForceLength .* normalizedMusc
 muscleForce = normalizedMuscleForce .* maximalIsometricForce ; 
 
 %% Create all muscle-tendon functions
-
 neuromusculoskeletal_state = vertcat(a, q, known_parameters) ; 
 
 all_states = vertcat(neuromusculoskeletal_state,rootedvariables);
@@ -344,9 +339,9 @@ getMuscleForce = Function('getMuscleForce', ...
     {all_states, muscleTendonParameters}, {muscleForce}, ...
     {'all_states','muscle_tendon_parameters'}, {'muscle_force'}) ;
 
-getPennationAngle = Function('getPennationAngle', ...
-    {all_states, muscleTendonParameters}, {pennationAngle}, ...
-    {'all_states','muscle_tendon_parameters'}, {'pennation_angle'});
+% getPennationAngle = Function('getPennationAngle', ...
+%     {all_states, muscleTendonParameters}, {pennationAngle}, ...
+%     {'all_states','muscle_tendon_parameters'}, {'pennation_angle'});
 
 normalizeTendonForce = Function('normalizeTendonForce', ...
     {all_states, muscleTendonParameters}, {normalizedTendonForce}, ...
@@ -373,28 +368,76 @@ normalizeFiberLength = Function('normalizeFiberLength', ...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Moment articulaire Mj(θ, t) = ∑ i=1 m (ri(θ) ⋅ Fimt(θ, t))
 jointMoment = momentArm' * tendonForce ;
+jointMoment = jointMoment(end,end) ;
 getJointMoment = Function('getJointMoment', ...
     {all_states, muscleTendonParameters}, {jointMoment}, ...
     {'all_states', 'muscle_tendon_parameters'}, {'jointMoment'});
 
-
 %% Muscle-tendon equilibrium
 % determine muscle length such that TendonForce - (cos(pennation_angle) .* MuscleForce) = 0
+% 
+% g0 = tendonForce - (cos(pennationAngle) .* muscleForce); 
+% g1 = umtLength - (cos(pennationAngle) .* fiberLength + tendonLength); 
+% 
+% p = vertcat(neuromusculoskeletal_state , muscleTendonParameters) ;
+% 
+% equilibriumError = Function('equilibriumError', {rootedvariables, p}, {vertcat(g0, g1)},{'x', 'p'}, {'residuals'}); 
+% 
+% opts = struct("constraints", ones(6,1)); % 1 means >= 0 
+% %equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','kinsol', equilibriumError, opts) ; 
+% 
+% equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','newton',equilibriumError, opts) ; 
 
-g0 = tendonForce - (cos(pennationAngle) .* muscleForce); 
-g1 = umtLength - (muscleLength + tendonLength); 
+%% Muscle-tendon equilibrium V2 
 
-% g = Function('g',[tendonLength, FiberLength],[g0, g1]) ; 
-x = vertcat(tendonLengthening, fiberLength);
 p = vertcat(neuromusculoskeletal_state , muscleTendonParameters) ;
 
-equilibriumError = Function('equilibriumError', {x, p}, {vertcat(g0, g1)},{'x', 'p'}, {'residuals'}); 
+FT = SX.sym('Tendon_force', nMuscles);
+FM = SX.sym('Muscle_force', nMuscles);
+pennationAngle = SX.sym('Pennation_angle', nMuscles);
 
-opts = struct("constraints", ones(6,1)); % 1 means >= 0 
-%equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','kinsol',g, opts) ; 
+
+g3 = FT - tendonForce ; 
+g4 = FM - muscleForce ; 
+g5 = umtLength - (cos(pennationAngle) .* fiberLength + tendonLength) ; 
+g6 = (optimalFiberLength .* sin(phi0)) - (fiberLength .* sin(pennationAngle)) ; 
+g7 = FM .* cos(pennationAngle) - FT ; 
+
+unknown  = vertcat(FT, FM, tendonLengthening, fiberLength, pennationAngle);
+equilibriumError = Function('equilibriumError', {unknown, p}, {vertcat(g3, g4, g5, g6, g7)},{'x', 'p'}, {'residuals'}); 
+
+opts_kinsol = struct("constraints", ones(15, 1), 'print_level',1); % 1 means >= 0 
+opts_newton = struct("constraints", ones(15, 1), 'print_iteration',1); % 1 means >= 0 
+
+equilibrateMuscleTendonN = rootfinder('equilibrateMuscleTendonN','newton',equilibriumError, opts_newton) ;
+equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','kinsol',equilibriumError, opts_kinsol) ;
+
+%% Muscle-tendon equilibrium V3
+
+% input 
+LUMT = SX.sym('UMT_length', nMuscles);
+SX.sym('Muscle_Activation', nMuscles);
+
+% unknown 
+FT = SX.sym('Tendon_force', nMuscles);
+FM = SX.sym('Muscle_force', nMuscles);
+pennationAngle = SX.sym('Pennation_angle', nMuscles); 
+fiberLength ; 
+tendonLength ; 
+
+% constraint 
+g3 = FT - tendonForce ; 
+g4 = FM - muscleForce ; 
+g5 = LUMT - (cos(pennationAngle) .* fiberLength + tendonLength) ; 
+g6 = (optimalFiberLength .* sin(phi0)) - (fiberLength .* sin(pennationAngle)) ; 
+g7 = FM .* cos(pennationAngle) - FT ; 
 
 
-equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','newton',EquilibriumError, opts) ; 
+unknown  = vertcat(FT, FM, tendonLengthening, fiberLength, pennationAngle) ; 
+known = vertcat(a, LUMT, muscleTendonParameters) ; 
+equilibriumError1 = Function('equilibriumError1', {unknown, known}, {vertcat(g3, g4, g5, g6, g7)},{'x', 'p'}, {'residuals'}); 
+equilibrateMuscleTendon1 = rootfinder('equilibrateMuscleTendon1','kinsol',equilibriumError1, opts_kinsol) ;
+
 
 %% function d'optimisation
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -411,7 +454,6 @@ representationMuscleActiveForceLength = Function('representationMuscleActiveForc
     {a(1),fiberLength(1), optimalFiberLength(1),maximalIsometricForce(1)}, {MuscleActiveForceLength(1)}, ...
     {'a','fiberLength', 'optimalFiberLength','maximalIsometricForce'}, {'MuscleActiveForceLength'}) ;
 
-
 representationTendonForce = Function('representationTendonForce', ...
     {tendonSlackLength(1), tendonLengthening(1),maximalIsometricForce(1)}, {tendonForce(1)}, ...
     {'tendonSlackLength', 'tendonLengthening','maximalIsometricForce'}, {'tendonForce'}) ;
@@ -419,14 +461,14 @@ representationTendonForce = Function('representationTendonForce', ...
 
 %% struct that stock casadi function 
 casadiFun = struct( ...
-    'equilibriumError', equilibriumError,...
+    'equilibrateMuscleTendon', equilibrateMuscleTendon,...
+    'equilibrateMuscleTendon1', equilibrateMuscleTendon1,...
     'ForwardKinematics',ForwardKinematics,...
     'getUMTLength', getUMTLength,...
     'getMomentArm', getMomentArm,...
     'getJointMoment',getJointMoment,...
     'getTendonForce', getTendonForce, ...
     'getMuscleForce', getMuscleForce,...
-    'getPennationAngle', getPennationAngle,...
     'getMusclePassiveForce',getMusclePassiveForce,...
     'getMuscleActiveForce', getMuscleActiveForce,...
     'normalizeTendonForce', normalizeTendonForce,...

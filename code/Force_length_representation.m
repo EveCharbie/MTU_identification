@@ -8,7 +8,7 @@ l0m = muscle_tendon_parameters_num(1:3);
 phi0 = muscle_tendon_parameters_num(4:6);
 f0m =  muscle_tendon_parameters_num(7:9);
 lst =  muscle_tendon_parameters_num(10:12);
-a = full(all_states_num(end-2 : end)) ;
+a = full(all_states_num(1 : 3)) ;
 
 % structures length
 fiberLength = full(casadiFun.normalizeFiberLength(all_states_num,muscle_tendon_parameters_num)) ;

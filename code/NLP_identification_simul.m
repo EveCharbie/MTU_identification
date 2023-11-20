@@ -1,6 +1,6 @@
 % import casadi
 [ret, name] = system('hostname');
-if strcmp(name, '942-27984')
+if strcmp(name(1:9), '942-27984')
     addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
 elseif strcmp(name(1:27), 'MacBook-Air-de-mickaelbegon')
     addpath('/Users/mickaelbegon/Downloads/casadi-3.6.3-osx64-matlab2018b/')
