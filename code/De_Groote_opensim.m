@@ -373,30 +373,13 @@ getJointMoment = Function('getJointMoment', ...
     {all_states, muscleTendonParameters}, {jointMoment}, ...
     {'all_states', 'muscle_tendon_parameters'}, {'jointMoment'});
 
-%% Muscle-tendon equilibrium
-% determine muscle length such that TendonForce - (cos(pennation_angle) .* MuscleForce) = 0
-% 
-% g0 = tendonForce - (cos(pennationAngle) .* muscleForce); 
-% g1 = umtLength - (cos(pennationAngle) .* fiberLength + tendonLength); 
-% 
-% p = vertcat(neuromusculoskeletal_state , muscleTendonParameters) ;
-% 
-% equilibriumError = Function('equilibriumError', {rootedvariables, p}, {vertcat(g0, g1)},{'x', 'p'}, {'residuals'}); 
-% 
-% opts = struct("constraints", ones(6,1)); % 1 means >= 0 
-% %equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','kinsol', equilibriumError, opts) ; 
-% 
-% equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','newton',equilibriumError, opts) ; 
-
-%% Muscle-tendon equilibrium V2 
-
+%% Muscle-tendon equilibrium 
 p = vertcat(neuromusculoskeletal_state , muscleTendonParameters) ;
-
 FT = SX.sym('Tendon_force', nMuscles);
 FM = SX.sym('Muscle_force', nMuscles);
 pennationAngle = SX.sym('Pennation_angle', nMuscles);
 
-
+% constraint 
 g3 = FT - tendonForce ; 
 g4 = FM - muscleForce ; 
 g5 = umtLength - (cos(pennationAngle) .* fiberLength + tendonLength) ; 
@@ -412,8 +395,7 @@ opts_newton = struct("constraints", ones(15, 1), 'print_iteration',1); % 1 means
 equilibrateMuscleTendonN = rootfinder('equilibrateMuscleTendonN','newton',equilibriumError, opts_newton) ;
 equilibrateMuscleTendon = rootfinder('equilibrateMuscleTendon','kinsol',equilibriumError, opts_kinsol) ;
 
-%% Muscle-tendon equilibrium V3
-
+%% Muscle-tendon equilibrium for all muscle 
 % input 
 LUMT = SX.sym('UMT_length', nMuscles);
 SX.sym('Muscle_Activation', nMuscles);
@@ -432,17 +414,17 @@ g5 = LUMT - (cos(pennationAngle) .* fiberLength + tendonLength) ;
 g6 = (optimalFiberLength .* sin(phi0)) - (fiberLength .* sin(pennationAngle)) ; 
 g7 = FM .* cos(pennationAngle) - FT ; 
 
-
 unknown  = vertcat(FT, FM, tendonLengthening, fiberLength, pennationAngle) ; 
 known = vertcat(a, LUMT, muscleTendonParameters) ; 
 equilibriumError1 = Function('equilibriumError1', {unknown, known}, {vertcat(g3, g4, g5, g6, g7)},{'x', 'p'}, {'residuals'}); 
 equilibrateMuscleTendon1 = rootfinder('equilibrateMuscleTendon1','kinsol',equilibriumError1, opts_kinsol) ;
 
-
-%% function d'optimisation
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-unknown_parameters = horzcat(optimalFiberLength,phi0,maximalIsometricForce,tendonSlackLength) ;
+%% Muscle-tendon equilibrium for a single muscle 
+unknown  = vertcat(FT(1), FM(1), tendonLengthening(1), fiberLength(1), pennationAngle(1)) ; 
+known = vertcat(a(1), LUMT(1), optimalFiberLength(1), phi0(1),maximalIsometricForce(1),tendonSlackLength(1)) ; 
+equilibriumErrorSingleMuscle = Function('equilibriumErrorSingleMuscle', {unknown, known}, {vertcat(g3(1), g4(1), g5(1), g6(1), g7(1))},{'x', 'p'}, {'residuals'}); 
+opts_kinsol = struct("constraints", ones(5, 1), 'print_level',1); % 1 means >= 0 
+equilibrateMuscleTendonSingleMuscle = rootfinder('equilibrateMuscleTendonSingleMuscle','kinsol',equilibriumErrorSingleMuscle, opts_kinsol) ;
 
 
 %% representation function 
@@ -463,6 +445,7 @@ representationTendonForce = Function('representationTendonForce', ...
 casadiFun = struct( ...
     'equilibrateMuscleTendon', equilibrateMuscleTendon,...
     'equilibrateMuscleTendon1', equilibrateMuscleTendon1,...
+    'equilibrateMuscleTendonSingleMuscle', equilibrateMuscleTendonSingleMuscle,...
     'ForwardKinematics',ForwardKinematics,...
     'getUMTLength', getUMTLength,...
     'getMomentArm', getMomentArm,...
