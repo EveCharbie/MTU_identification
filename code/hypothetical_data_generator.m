@@ -18,20 +18,29 @@ qankle = [-30, -20, -10, 0, 10, 20, 30, ...
     /180*pi ;
 qknee = [0, 20, 40, 60, 80, 70, 50, 30, 10]/180*pi ;
 
-% input :  muscle activation  (random)
+% input : 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 a_num = [0, 0, 0; ...
-    0, 0.2, 0.2;...
+    0, 0.2, 0.2; ...
     0, 0.4, 0.4;...
     0, 0.6, 0.6;...
     0, 0.8, 0.8;...
-    0, 1, 1] ;
+    0, 1, 1;...
+    0, 0.9, 0.9;...
+    0, 0.7, 0.7;...
+    0, 0.5, 0.5;...
+    0, 0.3, 0.3;...
+    0, 0.1, 0.1;...
+    0.2, 0, 0; ...
+    0.4, 0, 0;...
+    0.6, 0, 0;...
+    0.8, 0, 0;...
+    1, 0, 0];
 
 ntrials = 0 ;
 ntrialsfail = 0 ; 
 Data = [];
 
-%%
     % muscle tendon parameter 
 muscle_tendon_parameters_ta = muscle_tendon_parameters_num([1,4,7,10]) ; 
 muscle_tendon_parameters_sol = muscle_tendon_parameters_num([2,5,8,11]) ; 
@@ -52,14 +61,22 @@ for i = 1 : size(a_num,1) % activation muscle
             musculoskeletal_states_num = [q_num , known_parameters_num] ;
             neuromusculoskeletal_states_num = [a_num(i,:), musculoskeletal_states_num] ; 
             p_num = horzcat( neuromusculoskeletal_states_num, muscle_tendon_parameters_num) ;
-            
-            % Get UMT length 
+
+            q1(compt) = qknee(ii) ; 
+            q2(compt) = qankle(iii) ;
+           %input of the equilibrium function 
+                % muscle activation 
+            a_ta(compt) = a_num(i,1);
+            a_sol(compt) = a_num(i,2);
+            a_gast(compt) = a_num(i,3);
+
+                % UMT length 
             temp = casadiFun.getUMTLength(musculoskeletal_states_num) ; 
             length_UMT_ta(1,compt) = full( temp(1)) ;
             length_UMT_sol(1,compt) = full( temp(2)) ;
             length_UMT_gast(1,compt) = full( temp(3)) ;
             
-            % known parameter 
+                % known parameter 
             known_ta = [a_num(i,1), length_UMT_ta(1,compt) , muscle_tendon_parameters_ta] ;
             known_sol = [a_num(i,2), length_UMT_sol(1,compt) , muscle_tendon_parameters_sol] ;
             known_gast = [a_num(i,3), length_UMT_gast(1,compt) , muscle_tendon_parameters_gast] ;
@@ -93,7 +110,7 @@ for i = 1 : size(a_num,1) % activation muscle
             tendonLength_gast(compt) = unknown_gast(3) + muscle_tendon_parameters_gast(4) ;
 
             % torque 
-            torque(compt) = 1 ; % to do 
+            torque(compt) = full(casadiFun.getJointMoment2(musculoskeletal_states_num,[tendonForce_ta(compt),tendonForce_sol(compt),tendonForce_gast(compt)] ) ); 
             
 %                 if rand(1) > 0.9
 %                         Force_length_representation(all_states_num,muscle_tendon_parameters_num,casadiFun,NameMuscles)
@@ -102,8 +119,9 @@ for i = 1 : size(a_num,1) % activation muscle
     end
 end
 
-            % output data 
-%             Data = [torque'; a_num, ...
-%                 length_UMT_ta(1,compt), length_UMT_sol(1,compt), length_UMT_gast(1,compt),...
-%                 pennationAngle_ta, pennationAngle_sol, pennationAngle_gast,...
-%                 tendonLength_ta, tendonLength_sol, tendonLength_gast] ; 
+% output data
+Data = [torque', q2', q1',...
+    a_ta', a_sol', a_gast' ...
+    length_UMT_ta', length_UMT_sol', length_UMT_gast',...
+    pennationAngle_ta', pennationAngle_sol', pennationAngle_gast',...
+    tendonLength_ta', tendonLength_sol', tendonLength_gast'] ;
