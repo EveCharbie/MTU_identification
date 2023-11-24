@@ -389,7 +389,7 @@ g7 = FM .* cos(pennationAngle) - FT ;
 unknown  = vertcat(FT, FM, tendonLengthening, fiberLength, pennationAngle);
 equilibriumError = Function('equilibriumError', {unknown, p}, {vertcat(g3, g4, g5, g6, g7)},{'x', 'p'}, {'residuals'}); 
 
-opts_kinsol = struct("constraints", ones(15, 1), 'print_level',1); % 1 means >= 0 
+opts_kinsol = struct("constraints", ones(15, 1)); %, 'print_level',1); % 1 means >= 0 
 opts_newton = struct("constraints", ones(15, 1), 'print_iteration',1); % 1 means >= 0 
 
 equilibrateMuscleTendonN = rootfinder('equilibrateMuscleTendonN','newton',equilibriumError, opts_newton) ;
@@ -415,6 +415,7 @@ g6 = (optimalFiberLength .* sin(phi0)) - (fiberLength .* sin(pennationAngle)) ;
 g7 = FM .* cos(pennationAngle) - FT ; 
 
 unknown  = vertcat(FT, FM, tendonLengthening, fiberLength, pennationAngle) ; 
+
 known = vertcat(a, LUMT, muscleTendonParameters) ; 
 equilibriumError1 = Function('equilibriumError1', {unknown, known}, {vertcat(g3, g4, g5, g6, g7)},{'x', 'p'}, {'residuals'}); 
 equilibrateMuscleTendon1 = rootfinder('equilibrateMuscleTendon1','kinsol',equilibriumError1, opts_kinsol) ;
@@ -423,7 +424,11 @@ equilibrateMuscleTendon1 = rootfinder('equilibrateMuscleTendon1','kinsol',equili
 unknown  = vertcat(FT(1), FM(1), tendonLengthening(1), fiberLength(1), pennationAngle(1)) ; 
 known = vertcat(a(1), LUMT(1), optimalFiberLength(1), phi0(1),maximalIsometricForce(1),tendonSlackLength(1)) ; 
 equilibriumErrorSingleMuscle = Function('equilibriumErrorSingleMuscle', {unknown, known}, {vertcat(g3(1), g4(1), g5(1), g6(1), g7(1))},{'x', 'p'}, {'residuals'}); 
-opts_kinsol = struct("constraints", ones(5, 1), 'print_level',1); % 1 means >= 0 
+opts_kinsol = struct("constraints", ones(5, 1), ...    
+    'abstol', 1e-12, ...%'u_scale', [10, 10, 0.1, 0.01, 0.1]',...
+    'iterative_solver', 'bcgstab', ...%'bcgstab', ...
+    'print_level',0); % 1 means >= 0 
+
 equilibrateMuscleTendonSingleMuscle = rootfinder('equilibrateMuscleTendonSingleMuscle','kinsol',equilibriumErrorSingleMuscle, opts_kinsol) ;
 
 %% Moment articulaire Mj(θ, t) = ∑ i=1 m (ri(θ) ⋅ Fimt(θ, t))

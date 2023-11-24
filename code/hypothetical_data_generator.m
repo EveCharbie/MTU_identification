@@ -52,10 +52,12 @@ unknown_gast = [ones(1,3).* .0001 ,muscle_tendon_parameters_gast(1:2)] ;
 
 
     compt = 0 ; 
+    compt2 = 0;
 for i = 1 : size(a_num,1) % activation muscle
     for ii = 1 : length(qknee)
         for iii = 1 :  length(qankle)
-            compt = compt+1 ; 
+
+            compt = compt + 1;
             % Neuromusculoskeletal configuration
             q_num = [0, 0 , 0, 0, qknee(ii), qankle(iii) ] ; 
             musculoskeletal_states_num = [q_num , known_parameters_num] ;
@@ -85,32 +87,51 @@ for i = 1 : size(a_num,1) % activation muscle
             unknown_ta = full(casadiFun.equilibrateMuscleTendonSingleMuscle(unknown_ta, known_ta)) ; % x find            
             unknown_sol = full(casadiFun.equilibrateMuscleTendonSingleMuscle(unknown_sol, known_sol)) ; % x find
             unknown_gast = full(casadiFun.equilibrateMuscleTendonSingleMuscle(unknown_gast, known_gast)) ; % x find
-           
+    
+
+            %test
+            x = [unknown_ta, unknown_sol, unknown_gast];
+            x=x'; x=x(:);
+
+            y = [known_ta; known_sol; known_gast];
+            y=y(:);
+
+            err = casadiFun.equilibriumError1(x,y);
+            if any(full(err)>1e-5)
+                disp(compt)
+                disp("large error")
+                continue
+            end
+
+            compt2 = compt2+1 ; 
+
+
+
             % extract interest variales     
                 % ta
-            tendonForce_ta(compt) = unknown_ta(1) ;
-            muscleForce_ta(compt) = unknown_ta(2) ;
-            tendonLengthening_ta(compt) = unknown_ta(3) ;
-            fiberLength_ta(compt) = unknown_ta(4)  ;
-            pennationAngle_ta(compt) = unknown_ta(5)  ;
-            tendonLength_ta(compt) = unknown_ta(3) + muscle_tendon_parameters_ta(4) ;
+            tendonForce_ta(compt2) = unknown_ta(1) ;
+            muscleForce_ta(compt2) = unknown_ta(2) ;
+            tendonLengthening_ta(compt2) = unknown_ta(3) ;
+            fiberLength_ta(compt2) = unknown_ta(4)  ;
+            pennationAngle_ta(compt2) = unknown_ta(5)  ;
+            tendonLength_ta(compt2) = unknown_ta(3) + muscle_tendon_parameters_ta(4) ;
                 %sol
-            tendonForce_sol(compt) = unknown_sol(1) ;
-            muscleForce_sol(compt) = unknown_sol(2) ;
-            tendonLengthening_sol(compt) = unknown_sol(3) ;
-            fiberLength_sol(compt) = unknown_sol(4)  ;
-            pennationAngle_sol(compt) = unknown_sol(5)  ; 
-            tendonLength_sol(compt) = unknown_sol(3) + muscle_tendon_parameters_sol(4) ;
+            tendonForce_sol(compt2) = unknown_sol(1) ;
+            muscleForce_sol(compt2) = unknown_sol(2) ;
+            tendonLengthening_sol(compt2) = unknown_sol(3) ;
+            fiberLength_sol(compt2) = unknown_sol(4)  ;
+            pennationAngle_sol(compt2) = unknown_sol(5)  ; 
+            tendonLength_sol(compt2) = unknown_sol(3) + muscle_tendon_parameters_sol(4) ;
                 %gast
-            tendonForce_gast(compt) = unknown_gast(1) ;
-            muscleForce_gast(compt) = unknown_gast(2) ;
-            tendonLengthening_gast(compt) = unknown_gast(3) ;
-            fiberLength_gast(compt) = unknown_gast(4)  ;
-            pennationAngle_gast(compt) = unknown_gast(5)  ;   
-            tendonLength_gast(compt) = unknown_gast(3) + muscle_tendon_parameters_gast(4) ;
+            tendonForce_gast(compt2) = unknown_gast(1) ;
+            muscleForce_gast(compt2) = unknown_gast(2) ;
+            tendonLengthening_gast(compt2) = unknown_gast(3) ;
+            fiberLength_gast(compt2) = unknown_gast(4)  ;
+            pennationAngle_gast(compt2) = unknown_gast(5)  ;   
+            tendonLength_gast(compt2) = unknown_gast(3) + muscle_tendon_parameters_gast(4) ;
 
             % torque 
-            torque(compt) = full(casadiFun.getJointMoment2(musculoskeletal_states_num,[tendonForce_ta(compt),tendonForce_sol(compt),tendonForce_gast(compt)] ) ); 
+            torque(compt2) = full(casadiFun.getJointMoment2(musculoskeletal_states_num,[tendonForce_ta(compt),tendonForce_sol(compt),tendonForce_gast(compt)] ) ); 
             
 %                 if rand(1) > 0.9
 %                         Force_length_representation(all_states_num,muscle_tendon_parameters_num,casadiFun,NameMuscles)
@@ -120,12 +141,15 @@ for i = 1 : size(a_num,1) % activation muscle
 end
 
 % output data
-Data = [torque', q1', q2',...
-    a_ta', a_sol', a_gast' ...
-    length_UMT_ta', length_UMT_sol', length_UMT_gast',...
-    fiberLength_ta', fiberLength_sol', fiberLength_gast',...
-    pennationAngle_ta', pennationAngle_sol', pennationAngle_gast',...
-    tendonLength_ta', tendonLength_sol', tendonLength_gast'] ;
+Data = [torque', q1', q2',... 1..3
+    a_ta', a_sol', a_gast' ... 4..6
+    length_UMT_ta', length_UMT_sol', length_UMT_gast',... 7..9
+    fiberLength_ta', fiberLength_sol', fiberLength_gast',... 10..12
+    pennationAngle_ta', pennationAngle_sol', pennationAngle_gast',... 13..15
+    tendonLength_ta', tendonLength_sol', tendonLength_gast'... 16..18
+    tendonForce_ta', tendonForce_sol', tendonForce_gast',... 19..21
+    muscleForce_ta', muscleForce_sol', muscleForce_gast', ...22..24
+    tendonLengthening_ta', tendonLengthening_sol', tendonLengthening_gast'] ; %25..27
 
 % Best start : a   qknee   qankle  FT  FM  tendonLengthening   fiberLength pennationAngle
 BestStart_ta = [a_ta', length_UMT_ta', tendonForce_ta', muscleForce_ta',...
@@ -138,3 +162,4 @@ BestStart_gast = [a_gast', length_UMT_gast', tendonForce_gast', muscleForce_gast
     tendonLengthening_gast', fiberLength_gast', pennationAngle_gast'] ; 
 
 
+save("Data.mat", "Data")
