@@ -1,5 +1,8 @@
 %% hypothetical data
 % import model
+
+clear 
+close all
 De_Groote_opensim ;
 
 [known_parameters_num,muscle_tendon_parameters_num] = Opensim_extraction() ;
@@ -64,24 +67,16 @@ for i = 1 : size(a_num,1) % activation muscle
             neuromusculoskeletal_states_num = [a_num(i,:), musculoskeletal_states_num] ; 
             p_num = horzcat( neuromusculoskeletal_states_num, muscle_tendon_parameters_num) ;
 
-            q1(compt) = qknee(ii) ; 
-            q2(compt) = qankle(iii) ;
            %input of the equilibrium function 
-                % muscle activation 
-            a_ta(compt) = a_num(i,1);
-            a_sol(compt) = a_num(i,2);
-            a_gast(compt) = a_num(i,3);
 
                 % UMT length 
-            temp = casadiFun.getUMTLength(musculoskeletal_states_num) ; 
-            length_UMT_ta(1,compt) = full( temp(1)) ;
-            length_UMT_sol(1,compt) = full( temp(2)) ;
-            length_UMT_gast(1,compt) = full( temp(3)) ;
+            UMT_Length = full(casadiFun.getUMTLength(musculoskeletal_states_num)) ; 
+
             
                 % known parameter 
-            known_ta = [a_num(i,1), length_UMT_ta(1,compt) , muscle_tendon_parameters_ta] ;
-            known_sol = [a_num(i,2), length_UMT_sol(1,compt) , muscle_tendon_parameters_sol] ;
-            known_gast = [a_num(i,3), length_UMT_gast(1,compt) , muscle_tendon_parameters_gast] ;
+            known_ta = [a_num(i,1), UMT_Length(1) , muscle_tendon_parameters_ta] ;
+            known_sol = [a_num(i,2), UMT_Length(2) , muscle_tendon_parameters_sol] ;
+            known_gast = [a_num(i,3), UMT_Length(3) , muscle_tendon_parameters_gast] ;
 
             % Equilibrium
             unknown_ta = full(casadiFun.equilibrateMuscleTendonSingleMuscle(unknown_ta, known_ta)) ; % x find            
@@ -109,6 +104,19 @@ for i = 1 : size(a_num,1) % activation muscle
 
             % extract interest variales     
                 % ta
+            q1(compt2) = qknee(ii) ; 
+            q2(compt2) = qankle(iii) ;
+
+
+            a_ta(compt2) = a_num(i,1);
+            a_sol(compt2) = a_num(i,2);
+            a_gast(compt2) = a_num(i,3);
+
+
+            length_UMT_ta(1,compt2) = UMT_Length(1);
+            length_UMT_sol(1,compt2) = UMT_Length(2) ;
+            length_UMT_gast(1,compt2) = UMT_Length(3) ;            
+
             tendonForce_ta(compt2) = unknown_ta(1) ;
             muscleForce_ta(compt2) = unknown_ta(2) ;
             tendonLengthening_ta(compt2) = unknown_ta(3) ;

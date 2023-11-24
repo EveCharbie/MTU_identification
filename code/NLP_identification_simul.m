@@ -21,7 +21,7 @@ De_Groote_opensim ;
 % Call data_generator
 % hypothetical_data_generator ;
 load('Data.mat')
-ntrials = 50; %size(Data,1) ;
+ntrials = 10; %size(Data,1) ;
 selection = [1 randperm(size(Data,1), ntrials)];
 selection = sort(unique(selection));
 Data = Data(selection,:);
@@ -49,9 +49,9 @@ UP = vertcat(unknown_parameters(:,1),unknown_parameters(:,2),...
 % % create muscle parameters variables
 w = { w{:}, UP};
 % % we should find muscle_tendon_parameters_num
-w0 =  [w0; muscle_tendon_parameters_num' ]; %TODO: add noise
-lbw = [lbw; muscle_tendon_parameters_num' * 0.5]; % lower bound of variable
-ubw = [ubw; muscle_tendon_parameters_num' * 2]; % upper bound of variable
+w0 =  [w0; muscle_tendon_parameters_num'*1.3 ]; %TODO: add noise
+lbw = [lbw; muscle_tendon_parameters_num' * 0.3]; % lower bound of variable
+ubw = [ubw; muscle_tendon_parameters_num' * 3]; % upper bound of variable
 
 
 % header = header = {'Torque','q1','q2',...
@@ -108,7 +108,7 @@ for trial = 1:ntrials % for 1 to nb trials
     FM_k = SX.sym(['Muscle_Force_' str_trial], nMuscles);
         
 
-    w0_k = data([19:21, 22:24, 25:27, 10:12, 13:15]);
+    w0_k = data([19:21, 22:24, 25:27, 10:12, 13:15])*1.2;
     w_k =  vertcat(FT_k,FM_k,tendonLengthening_k,fiberLength_k,PennationAngle_k);
 
     w = { w{:}, w_k}; % better to use tendon length 
