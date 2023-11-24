@@ -313,7 +313,8 @@ known_parameters_num = [segment_geometry_num, muscle_origin, muscle_insersion, m
                 parameters.soleus_r.tendon_slack_length,...
                 parameters.gast.tendon_slack_length ] ; 
 
-muscle_tendon_parameters_num =  [l0m_num , phi0_num , f0m_num , lst_num ] ;  
+muscle_tendon_parameters_num =  [l0m_num , phi0_num , f0m_num , lst_num ] ; 
+
 
 fprintf(['Optimal fiber length (l0m) [Tibialis Anterior, Soleus, Gastrocnemius]','\n '])
 fprintf([num2str(l0m_num),'\n'])
