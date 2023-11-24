@@ -131,7 +131,8 @@ for i = 1 : size(a_num,1) % activation muscle
             tendonLength_gast(compt2) = unknown_gast(3) + muscle_tendon_parameters_gast(4) ;
 
             % torque 
-            torque(compt2) = full(casadiFun.getJointMoment2(musculoskeletal_states_num,[tendonForce_ta(compt),tendonForce_sol(compt),tendonForce_gast(compt)] ) ); 
+            torque(compt2) = full(casadiFun.getJointMoment2(musculoskeletal_states_num, ...
+                [tendonForce_ta(compt2),tendonForce_sol(compt2),tendonForce_gast(compt2)] ) ); 
             
 %                 if rand(1) > 0.9
 %                         Force_length_representation(all_states_num,muscle_tendon_parameters_num,casadiFun,NameMuscles)
