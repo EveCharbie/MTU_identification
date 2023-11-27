@@ -90,12 +90,28 @@ for i = 1 : size(a_num,1) % activation muscle
 
             y = [known_ta; known_sol; known_gast];
             y=y(:);
-
             err = casadiFun.equilibriumError1(x,y);
+            
+            % random initial guess
             if any(full(err)>1e-5)
-                disp(compt)
-                disp("large error")
-                continue
+                compterr = 0 ;
+                while compterr < 30
+                    xtemp = x * rand(1) ; 
+
+
+                    
+                    err = casadiFun.equilibriumError1(xtemp,y);
+
+                    if any(full(err)<1e-5)
+                        x = xtemp ; 
+                        break
+                    end
+                    compterr = compterr + 1 ;
+                end
+                if any(full(err)>1e-5)
+                    continue
+                end
+                fprintf('ERROR \n')
             end
 
             compt2 = compt2+1 ; 
