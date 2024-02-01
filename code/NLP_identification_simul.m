@@ -16,7 +16,8 @@ De_Groote_opensim ;
 % musculoskeletal scale 
 [known_parameters_num,muscle_tendon_parameters_num] = Opensim_extraction() ;
 
-
+% 'seed' for randomisation
+s = rng(2,"twister") ; 
 
 % Call data_generator
 % hypothetical_data_generator ;
