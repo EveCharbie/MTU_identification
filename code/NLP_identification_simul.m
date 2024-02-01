@@ -185,3 +185,10 @@ param_opt = w_opt(1:length(UP));
 err = param_opt' - muscle_tendon_parameters_num ; 
 
 
+% display between Reel and Estimated
+disp('Error between Reel and Estimated Muscle-Tendon Parameters :')
+disp(['Number of trials : ', num2str(ntrials)])
+disp(['err ℓom : ', num2str(err(1:3))])
+disp(['err φo : ', num2str(err(4:6))])
+disp(['err Fom : ', num2str(err(7:9))])
+disp(['err ℓst  : ', num2str(err(10:12))])
