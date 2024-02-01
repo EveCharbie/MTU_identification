@@ -31,8 +31,9 @@ ntrials = size(Data,1);
 
 % load best start value 
 load('StartEquilibrium.mat')
-% Add noise
 
+% Add noise
+ErrorInMesure = 1.3 ; 
 
 % Start with an empty NLP
 w={}; %variables
@@ -109,7 +110,8 @@ for trial = 1:ntrials % for 1 to nb trials
     FM_k = SX.sym(['Muscle_Force_' str_trial], nMuscles);
         
 
-    w0_k = data([19:21, 22:24, 25:27, 10:12, 13:15])*1.2;
+    w0_k = data([19:21, 22:24, 25:27, 10:12, 13:15]) ;
+    w0_k = w0_k * ErrorInMesure ;
     w_k =  vertcat(FT_k,FM_k,tendonLengthening_k,fiberLength_k,PennationAngle_k);
 
     w = { w{:}, w_k}; % better to use tendon length 
