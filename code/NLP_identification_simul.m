@@ -66,9 +66,9 @@ ubw = [ubw; muscle_tendon_parameters_num' * 3]; % upper bound of variable
 
 % Weightings in cost function
 W_torque = 1; % 1 Nm
-W_length = 1;% / 0.005; %todo 1Nm correspond à 5 mm
-W_angle = 1;% / ((3/180) * pi);  % 1 Nm correspond à 3 deg
-W_tendon = 1;% / 0.005; %todo 1Nm correspond à 5 mm
+W_length = 0.005; % 1Nm correspond à 5 mm
+W_angle = ((3/180) * pi); % 1 Nm correspond à 3 deg
+% W_tendon = 0.005; %todo 1Nm correspond à 5 mm
 
 
 eTorque = [];
