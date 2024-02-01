@@ -33,7 +33,17 @@ ntrials = size(Data,1);
 load('StartEquilibrium.mat')
 
 % Add noise
-ErrorInMesure = 1.3 ; 
+    % error in mesured value (20% of error)
+random_values = 0.10 * randn(1, ntrials) + 1; % Generate random values from a normal distribution
+random_values(random_values < 0.5) = 0.8; random_values(random_values > 1.5) = 1.2; % between 50 % and 150%
+ErrorInMesure = random_values ; 
+
+    % error in parameter estimation (to do)
+random_values = 0.25 * randn(1, ntrials) + 1; % Generate random values from a normal distribution
+random_values(random_values < 0.5) = 0.5; random_values(random_values > 1.5) = 1.5; % between 50 % and 150%
+
+
+
 
 % Start with an empty NLP
 w={}; %variables
@@ -111,7 +121,7 @@ for trial = 1:ntrials % for 1 to nb trials
         
 
     w0_k = data([19:21, 22:24, 25:27, 10:12, 13:15]) ;
-    w0_k = w0_k * ErrorInMesure ;
+    w0_k = w0_k * ErrorInMesure(trial) ;
     w_k =  vertcat(FT_k,FM_k,tendonLengthening_k,fiberLength_k,PennationAngle_k);
 
     w = { w{:}, w_k}; % better to use tendon length 
