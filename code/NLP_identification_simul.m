@@ -39,9 +39,9 @@ random_values(random_values < 0.5) = 0.8; random_values(random_values > 1.5) = 1
 ErrorInMesure = random_values ; 
 
     % error in parameter estimation (to do)
-random_values = 0.25 * randn(1, ntrials) + 1; % Generate random values from a normal distribution
+random_values = 0.22 * randn(1, size(muscle_tendon_parameters_num,2)) + 1; % Generate random values from a normal distribution
 random_values(random_values < 0.5) = 0.5; random_values(random_values > 1.5) = 1.5; % between 50 % and 150%
-
+ErrorIntialGuess = random_values ; 
 
 
 
@@ -61,7 +61,7 @@ UP = vertcat(unknown_parameters(:,1),unknown_parameters(:,2),...
 % % create muscle parameters variables
 w = { w{:}, UP};
 % % we should find muscle_tendon_parameters_num
-w0 =  [w0; muscle_tendon_parameters_num'*1.3 ]; %TODO: add noise
+w0 =  [w0; muscle_tendon_parameters_num' .* ErrorIntialGuess' ]; % intial guess
 lbw = [lbw; muscle_tendon_parameters_num' * 0.3]; % lower bound of variable
 ubw = [ubw; muscle_tendon_parameters_num' * 3]; % upper bound of variable
 
@@ -120,8 +120,8 @@ for trial = 1:ntrials % for 1 to nb trials
     FM_k = SX.sym(['Muscle_Force_' str_trial], nMuscles);
         
 
-    w0_k = data([19:21, 22:24, 25:27, 10:12, 13:15]) ;
-    w0_k = w0_k * ErrorInMesure(trial) ;
+    w0_k = data([19:21, 22:24, 25:27, 10:12, 13:15]) ; % mesured variables 
+    w0_k = w0_k * ErrorInMesure(trial) ; % add noise in mesured variables 
     w_k =  vertcat(FT_k,FM_k,tendonLengthening_k,fiberLength_k,PennationAngle_k);
 
     w = { w{:}, w_k}; % better to use tendon length 
