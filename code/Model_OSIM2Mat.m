@@ -1,4 +1,4 @@
-function [known_parameters_num,muscle_tendon_parameters_num] = Opensim_extraction()
+function [known_parameters_num,muscle_tendon_parameters_num] = ModelOSIM2Mat()
 % this function is for extract from opensim scale subjects -->
 %   - known_parameters_num :
 %       - segment_geometry_num
