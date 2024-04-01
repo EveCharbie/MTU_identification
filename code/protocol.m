@@ -15,8 +15,9 @@ SoleusGacstrocnemiusActivesConditions = ActivesConditions(any(ActivesConditions(
 
 TibialisAnteriorActivesConditions = [TibialisAnteriorActivesConditions(TibialisAnteriorActivesConditions(:,2) == (0/180)*pi, :)] ; % knee angle = 60 deg
 
-SoleusGacstrocnemiusActivesConditions = [SoleusGacstrocnemiusActivesConditions(SoleusGacstrocnemiusActivesConditions(:,2) == (0/180)*pi, :) ; ... % knee angle = 0 deg
-    SoleusGacstrocnemiusActivesConditions(SoleusGacstrocnemiusActivesConditions(:,2) == (60/180)*pi, :)] ; % knee angle = 60 deg
+% SoleusGacstrocnemiusActivesConditions = [SoleusGacstrocnemiusActivesConditions(SoleusGacstrocnemiusActivesConditions(:,2) == (0/180)*pi, :) ; ... % knee angle = 0 deg
+%     SoleusGacstrocnemiusActivesConditions(SoleusGacstrocnemiusActivesConditions(:,2) == (60/180)*pi, :)] ; % knee angle = 60 deg
+SoleusGacstrocnemiusActivesConditions  = SoleusGacstrocnemiusActivesConditions(SoleusGacstrocnemiusActivesConditions(:,2) == (0/180)*pi, :) ;  % knee angle = 0 deg
 
 qankle = ([-20, - 10, 0 , 10 ,20, 30 ]/ 180)*pi ; 
 SelectedActivesConditions = [] ; 
