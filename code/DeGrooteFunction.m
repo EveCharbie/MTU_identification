@@ -2,7 +2,7 @@ function [casadiFun,unknown_parameters,definition] = DeGrooteFunction()
 % import Casadi 
 [~, name] = system('hostname');
 if strcmp(name(1:9), '942-27984')
-    addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
+    addpath('C:\Users\Stage\Desktop\Doctorat\Manip_Neuromusculoskeletal_Modeling\Casadi')
 elseif strcmp(name(1:27), 'MacBook-Air-de-mickaelbegon')
     addpath('/Users/mickaelbegon/Downloads/casadi-3.6.3-osx64-matlab2018b/')
 end
@@ -430,7 +430,8 @@ unknown_parameters = horzcat(optimalFiberLength, phi0, maximalIsometricForce, te
 end
 
 function [rotation_matrix] = Rototranslation_Rz(x,y,z, rotZ)
-import casadi.SX
+%import casadi.SX
+import casadi.*
 
 rotation_matrix = SX.eye(4);
 rotation_matrix(1:2, 1:2) = [ cos(rotZ), -sin(rotZ) ; ...

@@ -1,21 +1,25 @@
-function [err] = NLP_identification_simulation(known_parameters_num,muscle_tendon_parameters_num,unknown_parameters,casadiFun,Data)
+function [err] = NLP_identification_simulation(known_parameters_num,muscle_tendon_parameters_num,unknown_parameters,casadiFun,Data,opts)
 % add information about the NLP 
     %% 1. Set Up function 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % import Casadi 
 [~, name] = system('hostname');
 if strcmp(name(1:9), '942-27984')
-    addpath('C:\Users\Stage\Desktop\Neuromusculoskeletal Modeling\Casadi')
+    addpath('C:\Users\Stage\Desktop\Doctorat\Manip_Neuromusculoskeletal_Modeling\Casadi')
 elseif strcmp(name(1:27), 'MacBook-Air-de-mickaelbegon')
     addpath('/Users/mickaelbegon/Downloads/casadi-3.6.3-osx64-matlab2018b/')
 end
 import casadi.*
 
+
+
 nMuscles = 3 ; % Number of muscle in our model [TibialisAnterior, Soleus, Gastrocnemius] 
 
-rng(2,"twister") ; % 'seed' for randomisation
+%rng(2,"twister") ; % 'seed' for randomisation
 
-ntrials = 40 ; % Number of trials selected for the estimation of muscle tendon parameters
+%ntrials = 40 ; % Number of trials selected for the estimation of muscle tendon parameters
+ntrials = 18 ; % Number of trials selected for the estimation of muscle tendon parameters
+
 
 % Add noise
     % error in mesured value (20% of error)
@@ -26,16 +30,25 @@ ntrials = 40 ; % Number of trials selected for the estimation of muscle tendon p
 
     %% 2. Selection of trials 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% 2.1 Interst (Random seletion)
-selection = [1 randperm(size(Data,1), ntrials)];
-selection = sort(unique(selection));
-Data = Data(selection,:); % selected Data 
-ntrials = size(Data,1); 
+    % 2.1 Interst
+opts = string(opts) ; 
+if opts == "RANDOM"  % (Random seletion)
+    selection = [1 randperm(size(Data,1), ntrials)];
+    selection = sort(unique(selection));
+    Data = Data(selection,:); % selected Data
+    ntrials = size(Data,1);
+elseif opts == "CHOSEN"
+    ntrials = size(Data,1);
+else
+    error('Error in option selection : input option must be "RANDOM" or "CHOSEN" --> RANDOM is selected')
+end
 
-% 2.1 Add noise
+rng(2,"twister") ; % 'seed' for randomisation
+
+% 2.2 Add noise
     % error in mesured value 
 random_values = 0.10 * randn(1, ntrials) + 1; % Generate random values from a normal distribution
-random_values(random_values < 0.5) = 0.8; random_values(random_values > 1.5) = 1.2; % between 50 % and 150%
+random_values(random_values < 0.8) = 0.8; random_values(random_values > 1.2) = 1.2; % between 80 % and 120%
 ErrorInMesure = random_values ;
 
     % error in parameter estimation 
