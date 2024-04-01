@@ -1,5 +1,4 @@
 %% protocol
-
 %% Passives conditions (mobilisations) 
 PassivesConditions = Data(all(Data(:,4:6) == 0,2),:) ; % Neuromuscular activation = 0
 PassivesConditions = [PassivesConditions(PassivesConditions(:,2) == (0/180)*pi, :) ; ... % knee angle = 0 deg
@@ -8,7 +7,7 @@ PassivesConditions = [PassivesConditions(PassivesConditions(:,2) == (0/180)*pi, 
 %% Actives conditions
 %   iMVC (a =1 )
 %   q1 : 0 and 80 
-%   q2 : [-20, - 10, 0 , 10 , 20 ]
+%   q2 : [-20, - 10, 0 , 10 ,20, 30 ]
 
 ActivesConditions = Data(any(Data(:,4:6) == 1,2),:) ; % Neuromuscular activation = 0
 TibialisAnteriorActivesConditions = ActivesConditions(ActivesConditions(:,4) == 1,:) ; % Neuromuscular activation = 1
@@ -19,7 +18,7 @@ TibialisAnteriorActivesConditions = [TibialisAnteriorActivesConditions(TibialisA
 SoleusGacstrocnemiusActivesConditions = [SoleusGacstrocnemiusActivesConditions(SoleusGacstrocnemiusActivesConditions(:,2) == (0/180)*pi, :) ; ... % knee angle = 0 deg
     SoleusGacstrocnemiusActivesConditions(SoleusGacstrocnemiusActivesConditions(:,2) == (60/180)*pi, :)] ; % knee angle = 60 deg
 
-qankle = ([-20, - 10, 0 , 10 , 20 ]/ 180)*pi ; 
+qankle = ([-20, - 10, 0 , 10 ,20, 30 ]/ 180)*pi ; 
 SelectedActivesConditions = [] ; 
 
 for i =  1 : size(TibialisAnteriorActivesConditions,1)
@@ -33,6 +32,8 @@ for i =  1 : size(SoleusGacstrocnemiusActivesConditions,1)
         SelectedActivesConditions = [SelectedActivesConditions ; SoleusGacstrocnemiusActivesConditions(i,:)];
     end 
 end
+
+
 nActivesTrials = size(SelectedActivesConditions,1); 
 
 SelectedConditions = [PassivesConditions; ... 
@@ -41,3 +42,5 @@ SelectedConditions = [PassivesConditions; ...
 
 
 %% sortir les tendons forces pour chaque Q1 et Q2 
+
+[err] = NLP_identification_simulation(known_parameters_num,muscle_tendon_parameters_num,unknown_parameters,casadiFun,SelectedConditions,"CHOSEN") ; 
