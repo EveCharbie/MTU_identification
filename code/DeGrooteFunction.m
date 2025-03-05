@@ -3,6 +3,8 @@ function [casadiFun,unknown_parameters,definition] = DeGrooteFunction()
 [~, name] = system('hostname');
 if strcmp(name(1:9), '942-27984')
     addpath('C:\Users\Stage\Desktop\Doctorat\Manip_Neuromusculoskeletal_Modeling\Casadi')
+    elseif strcmp(name(1:8), '151302-1')
+    addpath('C:\Users\amariani\Desktop\Thèse\Manip_Neuromusculoskeletal_Modeling\Casadi')
 elseif strcmp(name(1:27), 'MacBook-Air-de-mickaelbegon')
     addpath('/Users/mickaelbegon/Downloads/casadi-3.6.3-osx64-matlab2018b/')
 end
