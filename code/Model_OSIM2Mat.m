@@ -33,7 +33,7 @@ nom_fichier = [CurrentFolder, filesep, 'wholebody.osim'] ;
 
 
 % ====================================
-% ouverture du fichier et initialisation
+% Opening the file and initializing
 % ====================================
 fichier = fopen(nom_fichier,'rb');
 if (fichier == -1)

@@ -1,4 +1,4 @@
-function [casadiFun,vizualizationFun,unknown_parameters,definition] = DeGrooteFunction()
+function [casadiFun,vizualizationFun,unknown_parameters,definition] = ImprovedModelFunction()
 % import Casadi 
 [~, name] = system('hostname');
 if strcmp(name(1:9), '942-27984')
@@ -79,7 +79,7 @@ leg_length = SX.sym('leg',3);
 talus_length = SX.sym('talus',3);
 clac_length = SX.sym('foot',3);
 
-segment_geometry = vertcat(thigh_length, leg_length, talus_length ,clac_length);
+segment_geometry = vertcat(thigh_length, leg_length, talus_length, clac_length);
 
 % 1.2.3 Rototanslation matrix
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
