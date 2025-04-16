@@ -1,7 +1,9 @@
 function [casadiFun,unknown_parameters,definition] = DeGrooteFunction()
 % import Casadi 
 [~, name] = system('hostname');
-if strcmp(name(1:9), '942-27984')
+if strcmp(name(1:8), '151302-1')
+    addpath('C:\Users\amariani\Desktop\Thèse\Manip_Neuromusculoskeletal_Modeling\Casadi')
+elseif strcmp(name(1:9), '942-27984')
     addpath('C:\Users\Stage\Desktop\Doctorat\Manip_Neuromusculoskeletal_Modeling\Casadi')
 elseif strcmp(name(1:27), 'MacBook-Air-de-mickaelbegon')
     addpath('/Users/mickaelbegon/Downloads/casadi-3.6.3-osx64-matlab2018b/')
@@ -230,7 +232,13 @@ normalizedFiberLength = fiberLength ./ optimalFiberLength;
 % Tendon force-length (S1)
 kT = 35; c1 = 0.200; c2 = 0.995; c3 = 0.250; % tendon parameters
 
-normalizedTendonForce = c1 .* exp(kT .* (normalizedTendonLength - c2)) - c3; % Normalized equation 
+normalizedTendonForcePart1 =  0 ;
+normalizedTendonForcePart2 = c1 .* exp(kT .* (normalizedTendonLength - c2)) - c3; % Normalized equation 
+
+normalizedTendonForce = if_else(normalizedTendonLength < 1, ...
+    normalizedTendonForcePart1, ...
+    normalizedTendonForcePart2); % if normalized length under 0 the force = 0            % Normalized equation 
+
 tendonForce= normalizedTendonForce .* maximalIsometricForce ; % Non-normalized equation
 
     % 2.4.2 Muscle Forces Equations 
