@@ -49,7 +49,7 @@ a_num = [0.2, # activation tibialis
          0.2, # activation soleus
          0.2] # activation gast
 
-useful.test_model(skeleton_num,muscle_tendon_parameters_num,casadi_function,a_num,q_num)
+#useful.test_model(skeleton_num,muscle_tendon_parameters_num,casadi_function,a_num,q_num)
 
 #     2.bis test the neuromusculo model - interactive
 ##########################################################################
@@ -74,4 +74,4 @@ header, hypotetical_data = useful.hypotetical_data_generator(skeleton_num, muscl
 #    4. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)
 ##########################################################################
 #opts = 'chosen'
-#useful.nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function,hypotetical_data,'random',muscle_tendon_parameters_num)
+useful.nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function,hypotetical_data,'random',muscle_tendon_parameters_num)

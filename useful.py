@@ -862,13 +862,43 @@ def interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_functio
         all_state = np.concatenate([neuromusculoskeletal_state_num, rooted_variables])
 
         tendon_force = casadi_function['getTendonForce'](all_state, muscle_tendon_parameters_num)
+        muscle_passive_force = casadi_function['getMusclePassiveForce'](all_state, muscle_tendon_parameters_num)
+        muscle_active_force = casadi_function['getMuscleActiveForce'](all_state, muscle_tendon_parameters_num)
 
         ankle_torque = casadi_function['getJointMoment'](all_state, muscle_tendon_parameters_num)
 
         print('\n================== simulatied ==================')
-        print(f'tibialis force: {float(tendon_force[0]):.4f} N')
-        print(f'soleus force: {float(tendon_force[1]):.4f} N')
-        print(f'gastrocnemius force: {float(tendon_force[2]):.4f} N')
+        print('\n   mtu architecture:')
+        print('     - fiber length:')
+        print(f'tibialis: {float(x_opt_tibialis[0, 0]):.4f} m')
+        print(f'soleus: {float(x_opt_soleus[0, 0]):.4f} m')
+        print(f'gastrocnemius: {float(x_opt_gastrocnemius[0, 0]):.4f} m')
+        print('     - penation angle:')
+        print(f'tibialis: {float(np.rad2deg(x_opt_tibialis[1, 0])):.4f} deg')
+        print(f'soleus: {float(np.rad2deg(x_opt_soleus[1, 0])):.4f} deg')
+        print(f'gastrocnemius: {float(np.rad2deg(x_opt_gastrocnemius[1, 0])):.4f} deg')
+        print('     - tendon length:')
+        print(f'tibialis: {float(x_opt_tibialis[2, 0]):.4f} m')
+        print(f'soleus: {float(x_opt_soleus[2, 0]):.4f} m')
+        print(f'gastrocnemius: {float(x_opt_gastrocnemius[2, 0]):.4f} m')
+
+        print('\n   tendon force:')
+        print(f'tibialis: {float(tendon_force[0]):.4f} N')
+        print(f'soleus: {float(tendon_force[1]):.4f} N')
+        print(f'gastrocnemius: {float(tendon_force[2]):.4f} N')
+
+        print('\n   muscle force:')
+        print('     - muscle passive force:')
+        print(f'tibialis: {float(muscle_passive_force[0]):.4f} N')
+        print(f'soleus: {float(muscle_passive_force[1]):.4f} N')
+        print(f'gastrocnemius: {float(muscle_passive_force[2]):.4f} N')
+
+        print('     - muscle active force:')
+        print(f'tibialis: {float(muscle_active_force[0]):.4f} N')
+        print(f'soleus: {float(muscle_active_force[1]):.4f} N')
+        print(f'gastrocnemius: {float(muscle_active_force[2]):.4f} N')
+
+        print('\n   joint torque:')
         print(f'ankle moment: {float(ankle_torque[0]):.4f} N.m')
 
         fig.canvas.draw_idle()
@@ -1124,20 +1154,20 @@ def hypotetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casad
 
                     # 2.7 extract variable
                     # rooted = vertcat(tendon length,fiber lenght,,pennationAngle)
-                    tibialis_fiber_length = float(x_opt_tibialis[1])
-                    tibialis_pennation_angle = x_opt_tibialis[2]
+                    tibialis_fiber_length = float(x_opt_tibialis[0])
+                    tibialis_pennation_angle = x_opt_tibialis[1]
                     tibialis_pennation_angle = float(np.rad2deg(tibialis_pennation_angle))
-                    tibialis_tendon_length = float(x_opt_tibialis[0])
+                    tibialis_tendon_length = float(x_opt_tibialis[2])
 
-                    soleus_fiber_length = float(x_opt_soleus[1])
-                    soleus_pennation_angle = x_opt_soleus[2]
+                    soleus_fiber_length = float(x_opt_soleus[0])
+                    soleus_pennation_angle = x_opt_soleus[1]
                     soleus_pennation_angle = float(np.rad2deg(soleus_pennation_angle))
-                    soleus_tendon_length = float(x_opt_soleus[0])
+                    soleus_tendon_length = float(x_opt_soleus[2])
 
-                    gastrocnemius_fiber_length = float(x_opt_gastrocnemius[1])
-                    gastrocnemius_pennation_angle = x_opt_gastrocnemius[2]
+                    gastrocnemius_fiber_length = float(x_opt_gastrocnemius[0])
+                    gastrocnemius_pennation_angle = x_opt_gastrocnemius[1]
                     gastrocnemius_pennation_angle = float(np.rad2deg(gastrocnemius_pennation_angle))
-                    gastrocnemius_tendon_length = float(x_opt_soleus[0])
+                    gastrocnemius_tendon_length = float(x_opt_soleus[2])
 
                     hypotetical_data[ntrialsSucceds - 1] = [
                         float(ankle_torque),
@@ -1208,9 +1238,9 @@ def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_paramet
         q_trial = [0, 0, 0, 0] + list(data_trials[1:3])
 
         mesured_torque = data_trials[0]
-        mesured_fiber_length = data_trials[12:15]
-        mesured_pennation_angle =  data_trials[6:9]
-        mesured_tendon_length = data_trials[9:12]
+        mesured_fiber_length = data_trials[6:9]
+        mesured_pennation_angle =  np.deg2rad(data_trials[9:12]) #mesured in deg but in rad in NLP
+        mesured_tendon_length = data_trials[12:15]
 
         musculoskeletal_states_trial = q_trial + list(skeleton_num)
         neuromusculoskeletal_state_num = np.concatenate([a_trial, musculoskeletal_states_trial])
@@ -1223,8 +1253,8 @@ def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_paramet
         fiber_length_k = SX.sym(f"Fiber_length_{trial + 1}", n_muscle)
         pennation_angle_k = SX.sym(f"Pennation_Angle_{trial + 1}", n_muscle)
 
-        w0_k = np.concatenate([mesured_tendon_length, mesured_fiber_length,mesured_pennation_angle]) # zero-based indexing
-        w_k = vertcat(tendon_length_k, fiber_length_k, pennation_angle_k)
+        w0_k = np.concatenate([mesured_fiber_length,mesured_pennation_angle,mesured_tendon_length]) # zero-based indexing
+        w_k = vertcat( fiber_length_k, pennation_angle_k,tendon_length_k)
 
         # Append to global variables
         w += [w_k]
