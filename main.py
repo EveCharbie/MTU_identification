@@ -53,7 +53,7 @@ a_num = [0.2, # activation tibialis
 
 #     2.bis test the neuromusculo model - interactive
 ##########################################################################
-useful.interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_function)
+#useful.interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_function)
 
 #    3. hypotetical datavgenerator
 ##########################################################################
