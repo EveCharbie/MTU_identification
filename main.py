@@ -61,15 +61,15 @@ a_num = [0.2, # activation tibialis
 header, hypotetical_data = useful.hypotetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casadi_function)
 
 # Save path
-#save_dir = os.path.join(folders['main'])
-#os.makedirs(save_dir, exist_ok=True)
+save_dir = os.path.join(folders['main'])
+os.makedirs(save_dir, exist_ok=True)
 
 # Convert to a DataFrame
-#df = pd.DataFrame(hypotetical_data, columns=header)
+df = pd.DataFrame(hypotetical_data, columns=header)
 
 # Save to Excel
-#excel_path = os.path.join(save_dir, "hypothetical_data.xlsx")
-# df.to_excel(excel_path, index=False)
+excel_path = os.path.join(save_dir, "hypothetical_data.xlsx")
+df.to_excel(excel_path, index=False)
 
 #    4. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)
 ##########################################################################

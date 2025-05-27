@@ -1,5 +1,6 @@
 import os
 import random
+import math
 import xml.etree.ElementTree as ET
 import numpy as np
 from casadi import SX, DM, vertcat, horzcat, Function, sqrt, exp, if_else, sum1, jacobian, rootfinder,nlpsol
@@ -596,6 +597,7 @@ def de_groote_function():
     opts_newton = {
         "abstol": 1e-8,
         "max_iter": 1000,
+        "error_on_fail": False,
         "print_iteration": True,
     }
 
@@ -659,6 +661,7 @@ def de_groote_function():
         opts_newtonSM = {
             "abstol" : 1e-8,
             "max_iter" : 1000,
+            "error_on_fail" : False,
             "print_iteration" : True,
         }
 
@@ -1071,25 +1074,32 @@ def root_muscle_dynamics(a,lmtu,parameters,muscle_name,casadi_function):
     solution where all residuals fall below a defined tolerance (`lim_residuals`). If successful,
     it returns the solution and the status. The process and results are printed for each attempt.
     """
-    lim_residuals = 1e-10
+    lim_residuals = 1e-7
     equilibrium_status = 'fail'
-    max_attempts = 50
+    max_attempts = 100
     attempt = 0
 
     while equilibrium_status == 'fail' and attempt < max_attempts:
         attempt += 1
         x_start = x_start_equi(a, lmtu, parameters)
+        print(x_start)
+        try:
+            x_opt = casadi_function['equilibrateMuscleTendonSingleMuscle'](
+                x_start,
+                np.array([a, lmtu] + parameters.tolist())
+            )
+            if x_opt[1] < 0 or x_opt[1] > math.pi/2:
+                x_opt[1] = DM(float(x_opt[1]) % math.pi/2)
+                x_opt[2] = DM(abs(float(x_opt[2])))
 
-        x_opt = casadi_function['equilibrateMuscleTendonSingleMuscle'](
-            x_start,
-            np.array([a, lmtu] + parameters.tolist())
-        )
+            residuals_print = casadi_function['equilibriumErrorSingleMuscle'](
+                x_opt,
+                np.array([a, lmtu] + parameters.tolist())
+            )
+            residuals = np.array(residuals_print).flatten()
+        except Exception as e:
+            print("Something went wrong:", e)
 
-        residuals_print = casadi_function['equilibriumErrorSingleMuscle'](
-            x_opt,
-            np.array([a, lmtu] + parameters.tolist())
-        )
-        residuals = np.array(residuals_print).flatten()
 
         if np.any(residuals > lim_residuals):
             print(f"[Attempt {attempt}] Root-finding failed: residual too high ({residuals})")
@@ -1135,6 +1145,12 @@ def x_start_equi(a, lmtu, parameters):
     # ============= output =============
     # x_start = [tendon_force, muscle_force, tendon_lengthening, fiber_length, pennation_angle]
     x_start = [fiber_length, pennation_angle,tendon_length]
+
+    if np.any(x_start < np.array(0.0)):
+        x_start = [parameters[0]* np.random.uniform(0.8, 1.2) , parameters[1], parameters[3]* np.random.uniform(0.08, 1.02)]
+    if np.any(np.isinf(x_start)):
+        x_start = [parameters[0]* np.random.uniform(0.8, 1.2) , parameters[1], parameters[3]* np.random.uniform(0.08, 1.02)]
+
     x_start = np.round(x_start, 4)
 
     return x_start
@@ -1168,7 +1184,9 @@ def hypotetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casad
     # ========= 1 Muscle-Tendon Architecture Equations   ========= #
     # ========= 1.1 Musculo skeletical configuration during trial(input)   ========= #
     qknee = np.linspace(0, 90, 5)  # example knee angles
-    qankle = np.linspace(-20, 30, 5)  # example ankle angles
+    qknee = np.deg2rad(qknee)
+    qankle = np.linspace(-20, 30, 10)  # example ankle angles
+    qankle = np.deg2rad(qankle)
 
     # ========= 1.2 Neuronal activation(input)   ========= #
     # Muscle activation [Tibialis Anterior, Soleus, Gastrocnemius]
@@ -1276,13 +1294,13 @@ def hypotetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casad
 
                     hypotetical_data[ntrialsSucceds - 1] = [
                         float(ankle_torque),
-                        qknee[ii], qankle[iii],
+                        np.rad2deg(qknee[ii]), np.rad2deg(qankle[iii]),
                         float(a_num[i, 0]), float(a_num[i, 1]), float(a_num[i, 2]),
                         tibialis_fiber_length, soleus_fiber_length, gastrocnemius_fiber_length,
                         tibialis_pennation_angle, soleus_pennation_angle, gastrocnemius_pennation_angle,
                         tibialis_tendon_length,soleus_tendon_length,gastrocnemius_tendon_length
                     ]
-
+    hypotetical_data = hypotetical_data[0:ntrialsSucceds]
     print('\n================== hypotetical data generator state ==================')
     print(f"fail trials: {(ntrialsFail/ntrials)*100:.2f} %")
 
@@ -1340,7 +1358,7 @@ def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_paramet
         # Extract measured data
         data_trials = data[trial, :]
         a_trial = data_trials[3:6]
-        q_trial = [0, 0, 0, 0] + list(data_trials[1:3])
+        q_trial = [0, 0, 0, 0] + list(np.deg2rad(data_trials[1:3]))
 
         mesured_torque = data_trials[0]
         mesured_fiber_length = data_trials[6:9]
@@ -1378,9 +1396,10 @@ def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_paramet
         lbg += [0] * 9
         ubg += [0] * 9
 
-        rooted_variables = casadi_function['equilibrateMuscleTendon'](w_k, k)
+        #rooted_variables = casadi_function['equilibrateMuscleTendon'](w_k, k)
+        #all_states = vertcat(SX(neuromusculoskeletal_state_num.tolist()), rooted_variables)
 
-        all_states = vertcat(SX(neuromusculoskeletal_state_num.tolist()), rooted_variables)
+        all_states = vertcat(SX(neuromusculoskeletal_state_num.tolist()), w_k)
 
         # Simulate torque and compute errors
         torque_simulated = casadi_function['getJointMoment'](all_states, unknown_parameters)
