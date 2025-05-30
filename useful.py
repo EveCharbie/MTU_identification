@@ -3,7 +3,7 @@ import random
 import math
 import xml.etree.ElementTree as ET
 import numpy as np
-from casadi import SX, DM, vertcat, horzcat, Function, sqrt, exp, if_else, sum1, jacobian, rootfinder,nlpsol
+from casadi import SX, DM, vertcat, horzcat, Function, sqrt, exp, if_else, sum1, jacobian, rootfinder,nlpsol, sparsify,cos
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.widgets import Slider
@@ -466,34 +466,34 @@ def de_groote_function():
     fm_tilde3 = b13 * np.exp(-0.5 * (num3 ** 2) / (den3 ** 2))
 
     # Total normalized active force-length
-    normalized_muscle_active_force_length = fm_tilde1 + fm_tilde2 + fm_tilde3
+    normalized_fiber_active_force_length = fm_tilde1 + fm_tilde2 + fm_tilde3
 
     # Non-normalized active force
-    muscle_active_force_length = a * normalized_muscle_active_force_length * maximalIsometricForce
+    fiber_active_force_length = a * normalized_fiber_active_force_length * maximalIsometricForce
 
         # === Passive Force-Length (S3) ===
     kpe = 4.0
     e0 = 0.6
 
-    normalized_muscle_passive_force_part_1 = 0
-    normalized_muscle_passive_force_part_2 = (exp(((kpe * (normalized_fiber_length - 1)) / e0)) - 1) / (exp(kpe) - 1)
+    normalized_fiber_passive_force_part_1 = 0
+    normalized_fiber_passive_force_part_2 = (exp(((kpe * (normalized_fiber_length - 1)) / e0)) - 1) / (exp(kpe) - 1)
 
-    normalized_muscle_passive_force = if_else(normalized_fiber_length < 1,
-    normalized_muscle_passive_force_part_1,
-    normalized_muscle_passive_force_part_2) # if normalized length under 0 the force = 0 %Normalized equation
+    normalized_fiber_passive_force = if_else(normalized_fiber_length < 1,
+    normalized_fiber_passive_force_part_1,
+    normalized_fiber_passive_force_part_2) # if normalized length under 0 the force = 0 %Normalized equation
 
-    muscle_passive_force = normalized_muscle_passive_force * maximalIsometricForce #Non - normalized equation
+    fiber_passive_force = normalized_fiber_passive_force * maximalIsometricForce #Non - normalized equation
 
         # === Force-Velocity (S4) ===
-    normalized_muscle_force_velocity = 1.0  # Assuming velocity = 0
+    normalized_fiber_force_velocity = 1.0  # Assuming velocity = 0
 
         # === Total Force ===
-    normalized_muscle_force = (
-            a * normalized_muscle_active_force_length * normalized_muscle_force_velocity
-            + normalized_muscle_passive_force
+    normalized_fiber_force = (
+            a * fiber_active_force_length * normalized_fiber_force_velocity
+            + fiber_passive_force
     )
 
-    muscle_force = normalized_muscle_force * maximalIsometricForce
+    fiber_force = normalized_fiber_force * maximalIsometricForce
 
     # ========= 2.5  Casadi functions about model Muscle-Tendon Forces   ========= #
     neuromusculoskeletal_state = vertcat(a, q, musculoskeletal)
@@ -510,9 +510,9 @@ def de_groote_function():
     getMuscleForce = Function(
         'getMuscleForce',
         [all_states, muscleTendonParameters],
-        [muscle_force],
+        [fiber_force],
         ['all_states', 'muscle_tendon_parameters'],
-        ['muscle_force']
+        ['fiber_force']
     )
 
     normalizeTendonForce = Function(
@@ -526,33 +526,33 @@ def de_groote_function():
     getMusclePassiveForce = Function(
         'getMusclePassiveForce',
         [all_states, muscleTendonParameters],
-        [muscle_passive_force],
+        [fiber_passive_force],
         ['all_states', 'muscle_tendon_parameters'],
-        ['MusclePassiveForce']
+        ['FiberPassiveForce']
     )
 
     getMuscleActiveForce = Function(
         'getMuscleActiveForce',
         [all_states, muscleTendonParameters],
-        [muscle_active_force_length],
+        [fiber_active_force_length],
         ['all_states', 'muscle_tendon_parameters'],
-        ['MuscleActiveForce']
+        ['FiberActiveForce']
     )
 
     representationMusclePassiveForce = Function(
         'representationMusclePassiveForce',
         [fiber_length[0], optimalFiberLength[0], maximalIsometricForce[0]],
-        [muscle_passive_force[0]],
+        [fiber_passive_force[0]],
         ['fiberLength', 'optimalFiberLength', 'maximalIsometricForce'],
-        ['MusclePassiveForce']
+        ['FiberPassiveForce']
     )
 
     representationMuscleActiveForceLength = Function(
         'representationMuscleActiveForceLength',
         [a[0], fiber_length[0], optimalFiberLength[0], maximalIsometricForce[0]],
-        [muscle_active_force_length[0]],
+        [fiber_active_force_length[0]],
         ['a', 'fiberLength', 'optimalFiberLength', 'maximalIsometricForce'],
-        ['MuscleActiveForceLength']
+        ['FiberActiveForceLength']
     )
 
     representationTendonForce = Function(
@@ -580,18 +580,86 @@ def de_groote_function():
     )
 
                         # ========= 3. equilibrium functions   ========= #
-    # ========= 3.1 inputed and rooted variables of equilibrium functions   ========= #
+
+    # ========= 3.3.1 single muscle   ========= #
         # === input ==
     l_mtu = SX.sym('UMT_length', nMuscles)
 
-    # ========= 3.2 constraint functions   ========= #
+        # === constraint functions  === #
     g5 = l_mtu - (np.cos(pennation_angle) * fiber_length + tendon_length)
     g6 = (optimalFiberLength * np.sin(phi0)) - (fiber_length * np.sin(pennation_angle))
-    g7 = muscle_force * np.cos(pennation_angle) - tendon_force
+    g7 = fiber_force * np.cos(pennation_angle) - tendon_force
 
-    # ========= 3.2 Muscle - tendon equilibrium   ========= #
-        #  === all muscle  ===
-    unknown = vertcat(fiber_length, pennation_angle, tendon_length)
+        # === problem  === #
+    unknown = vertcat(fiber_length[0], pennation_angle[0], tendon_length[0])
+    known = vertcat(a[0], l_mtu[0], optimalFiberLength[0], phi0[0], maximalIsometricForce[0], tendonSlackLength[0])
+
+    equilibriumErrorSingleMuscle = Function(
+        'equilibriumErrorSingleMuscle',
+        [unknown, known],
+        [vertcat(g5[0], g6[0], g7[0])],
+        ['x', 'p'],
+        ['residuals'],
+    )
+
+    solver_alorithm = 'newton'
+
+    if solver_alorithm == 'kinsol':
+        # kinsol
+        scale_const = 1 / DM([0.1, 0.001, 0.1])
+        opts_kinsolSM = {
+            "constraints": tuple(1 for _ in range(len(scale_const.elements()))),  # [1,1,1,1,1], #SX.ones(5, 1),
+            "abstol": 1e-8,
+            "u_scale": scale_const.elements(),
+            "fd_method": 'central',
+            "error_on_fail": False,
+            "max_iter": 1000,
+            "iterative_solver": 'bcgstab',
+            "print_level": 3,
+            "disable_internal_warnings": True
+        }
+
+        equilibrateMuscleTendonSingleMuscle = rootfinder(
+            'equilibrateMuscleTendonSingleMuscle',
+            'kinsol',
+            equilibriumErrorSingleMuscle,
+            opts_kinsolSM
+        )
+
+    elif solver_alorithm == 'newton':
+        # newton
+        opts_newtonSM = {
+            "abstol": 1e-8,
+            "max_iter": 1000,
+            "error_on_fail": False,
+            "print_iteration": True,
+        }
+
+        equilibrateMuscleTendonSingleMuscle = rootfinder(
+            'equilibrateMuscleTendonSingleMuscle',
+            'newton',
+            equilibriumErrorSingleMuscle,
+            opts_newtonSM
+        )
+
+
+
+
+        # ========= 3.3.2 all muscle   ========= #
+        # === input ==
+    l_mtu = SX.sym('UMT_length', nMuscles)
+    tendon_force_SX = SX.sym('tendon_force', nMuscles)
+    fiber_force_SX = SX.sym('muscle_force', nMuscles)
+
+    # === constraint functions  === #
+    g3 = tendon_force_SX - tendon_force
+    g4 = fiber_force_SX - fiber_force
+    g5 = l_mtu - (np.cos(pennation_angle) * fiber_length + tendon_length)
+    g6 = (optimalFiberLength * np.sin(phi0)) - (fiber_length * np.sin(pennation_angle))
+    g7 = fiber_force_SX * np.cos(pennation_angle) - tendon_force_SX
+
+    # === problem  === #
+    unknown = vertcat(tendon_force_SX,fiber_force_SX,fiber_length, pennation_angle, tendon_length)
     known = vertcat(a, l_mtu, muscleTendonParameters)
 
     opts_newton = {
@@ -604,7 +672,7 @@ def de_groote_function():
     equilibriumError = Function(
         'equilibriumError',
         [unknown, known],
-        [vertcat(g5, g6, g7)],
+        [vertcat(g3, g4, g5, g6, g7)],
         ['x', 'p'],
         ['residuals']
     )
@@ -617,63 +685,8 @@ def de_groote_function():
         opts_newton  # options dictionary
     )
 
-    # ========= 3.3.1 single muscle   ========= #
-    unknown = []
-    known = []
-    unknown = vertcat(fiber_length[0], pennation_angle[0], tendon_length[0])
-    known = vertcat(a[0], l_mtu[0], optimalFiberLength[0], phi0[0], maximalIsometricForce[0], tendonSlackLength[0])
-
-    equilibriumErrorSingleMuscle = Function(
-        'equilibriumErrorSingleMuscle',
-        [unknown, known],
-        [vertcat(g5[0], g6[0], g7[0])],
-        ['x', 'p'],
-        ['residuals'],
-    )
-
-    # solver_alorithm = 'kinsol'
-    solver_alorithm = 'newton'
-
-    if solver_alorithm == 'kinsol':
-        # kinsol
-        scale_const = 1/DM([0.1, 0.001, 0.1])
-        opts_kinsolSM = {
-            "constraints" : tuple(1 for _ in range(len(scale_const.elements())))  , #[1,1,1,1,1], #SX.ones(5, 1),
-            "abstol" : 1e-8,
-            "u_scale" : scale_const.elements(),
-            "fd_method" :'central',
-            "error_on_fail" : False,
-            "max_iter" : 1000,
-            "iterative_solver" : 'bcgstab',
-            "print_level" : 3,
-            "disable_internal_warnings" : True
-        }
-
-        equilibrateMuscleTendonSingleMuscle = rootfinder(
-              'equilibrateMuscleTendonSingleMuscle',
-              'kinsol',
-              equilibriumErrorSingleMuscle,
-              opts_kinsolSM
-        )
-
-    elif solver_alorithm == 'newton':
-        # newton
-        opts_newtonSM = {
-            "abstol" : 1e-8,
-            "max_iter" : 1000,
-            "error_on_fail" : False,
-            "print_iteration" : True,
-        }
-
-        equilibrateMuscleTendonSingleMuscle = rootfinder(
-            'equilibrateMuscleTendonSingleMuscle',
-            'newton',
-            equilibriumErrorSingleMuscle,
-            opts_newtonSM
-        )
-
                                 # ========= 4. Computing Joint Moments and Angles    ========= #
-    joint_torque = moment_arm * tendon_force
+    joint_torque = moment_arm * ((tendon_force + fiber_force * cos(pennation_angle)) / 2)
     joint_torque = sum1(joint_torque[:,-1:])
 
     getJointMoment = Function(
@@ -682,6 +695,36 @@ def de_groote_function():
         [joint_torque],
         ['all_states', 'muscle_tendon_parameters'],
         ['joint_torque']
+    )
+    # ========= 4. Computing Joint Moments and Angles    ========= #
+    opimization_variables = vertcat(tendon_force_SX,fiber_force_SX,fiber_length,pennation_angle,tendon_length)
+    all_states_nlp = vertcat(neuromusculoskeletal_state, opimization_variables)
+
+    getJointMomentNLP = Function(
+        'getJointMoment',
+        [all_states_nlp, muscleTendonParameters],
+        [joint_torque],
+        ['all_states_nlp', 'muscle_tendon_parameters'],
+        ['joint_torque']
+    )
+
+
+    # estimation of muscle force and tendon force
+
+    estimateTendonForce = Function(
+        'estimateTendonForce',
+        [tendon_length, muscleTendonParameters],
+        [tendon_force],
+        ['tendon_length', 'muscle_tendon_parameters'],
+        ['tendon_force']
+    )
+
+    estimateFiberForce = Function(
+        'estimateFiberForce',
+        [a,fiber_length, muscleTendonParameters],
+        [fiber_force],
+        ['muscle_activation','fiber_length','muscle_tendon_parameters'],
+        ['fiber_force']
     )
 
                             # ========= 5. dictionnary of casadi function     ========= #
@@ -704,7 +747,10 @@ def de_groote_function():
         "equilibrateMuscleTendon": equilibrateMuscleTendon,
         "equilibriumErrorSingleMuscle": equilibriumErrorSingleMuscle,
         "equilibrateMuscleTendonSingleMuscle": equilibrateMuscleTendonSingleMuscle,
-        "getJointMoment": getJointMoment
+        "getJointMoment": getJointMoment,
+        "getJointMomentNLP":getJointMomentNLP,
+        "estimateTendonForce":estimateTendonForce,
+        "estimateFiberForce":estimateFiberForce
     }
 
     definition = ["a : Neuromuscular activation (between 0 and 1)",
@@ -1121,8 +1167,6 @@ def x_start_equi(a, lmtu, parameters):
    equilibrium.
 
    equilibrium function:
-    g3 = FT - tendonForce
-    g4 = FM - muscleForce
     g5 = LUMT - (np.cos(pennationAngle) * fiberLength + tendonLength)
     g6 = (optimalFiberLength * np.sin(phi0)) - (fiberLength * np.sin(pennationAngle))
     g7 = FM * np.cos(pennationAngle) - FT
@@ -1158,7 +1202,7 @@ def x_start_equi(a, lmtu, parameters):
 def hypotetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casadi_function):
     """ generate hypotetical data to make the NLP
    .
-    rooted = vertcat(tendon_length, fiber_length, pennation_angle)
+    rooted = vertcat(tendon_force,muscle_force,tendon_length, fiber_length, pennation_angle)
 
 
            Returns:
@@ -1183,7 +1227,7 @@ def hypotetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casad
 
     # ========= 1 Muscle-Tendon Architecture Equations   ========= #
     # ========= 1.1 Musculo skeletical configuration during trial(input)   ========= #
-    qknee = np.linspace(0, 90, 5)  # example knee angles
+    qknee = np.linspace(0, 90, 2)  # example knee angles
     qankle = np.linspace(-20, 30, 5)  # example ankle angles
 
     qknee = np.deg2rad(qknee)
@@ -1294,7 +1338,7 @@ def hypotetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casad
                     gastrocnemius_fiber_length = float(x_opt_gastrocnemius[0])
                     gastrocnemius_pennation_angle = x_opt_gastrocnemius[1]
                     gastrocnemius_pennation_angle = float(np.rad2deg(gastrocnemius_pennation_angle))
-                    gastrocnemius_tendon_length = float(x_opt_soleus[2])
+                    gastrocnemius_tendon_length = float(x_opt_gastrocnemius[2])
 
                     hypotetical_data[ntrialsSucceds - 1] = [
                         float(ankle_torque),
@@ -1311,9 +1355,24 @@ def hypotetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casad
     return header, hypotetical_data
 
 def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function,data,opts,initial_guess):
-    print('test')
+    """ root muscle tendon parameter (ℓom, φo, Fom, ℓst)
+   .
+    skeleton_num: .osim scale squeleton
+    muscle_tendon_parameters_num: 
+    unknown_parameters
+    casadi_function
+    data
+    opts
+    initial_guess
+
+           Returns:
+               xopt (np.ndarray): Shape (12,ntrials) (ℓom, φo, Fom, ℓst)
+
+   """
+
+    xopt = []
     n_muscle = 3 # Number of muscle in our model[TibialisAnterior, Soleus, Gastrocnemius]
-    n_trials = 500 # Number of trials selected for the estimation of muscle tendon parameters
+    n_trials = 20 # Number of trials selected for the estimation of muscle tendon parameters
     muscle_tendon_parameters_num = np.array(muscle_tendon_parameters_num)
     initial_guess = np.array(initial_guess)
 
@@ -1369,44 +1428,44 @@ def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_paramet
         mesured_pennation_angle =  np.deg2rad(data_trials[9:12]) #mesured in deg but in rad in NLP
         mesured_tendon_length = data_trials[12:15]
 
+        estimated_tendon_force = np.array(casadi_function['estimateTendonForce'](mesured_tendon_length,initial_guess)).flatten()
+        estimated_fiber_force = np.array(casadi_function['estimateFiberForce'](a_trial,mesured_fiber_length,initial_guess)).flatten()
+
         musculoskeletal_states_trial = q_trial + list(skeleton_num)
-        neuromusculoskeletal_state_num = np.concatenate([a_trial, musculoskeletal_states_trial])
+        neuromusculoskeletal_state_trial = np.concatenate([a_trial, musculoskeletal_states_trial])
 
         # Compute UMT length
         mtu_length = casadi_function['getMTULength'](musculoskeletal_states_trial)
 
-        # Define decision variables for the trial: rooted_variables = (tendon length, fiber length, pennation angle)
+        # Define decision variables for the trial: rooted_variables = (tendon force, muscle force, tendon length, fiber length, pennation angle)
         tendon_length_k = SX.sym(f"Tendon_Length_{trial + 1}", n_muscle)
-        fiber_length_k = SX.sym(f"Fiber_length_{trial + 1}", n_muscle)
+        fiber_length_k = SX.sym(f"Fiber_Length_{trial + 1}", n_muscle)
         pennation_angle_k = SX.sym(f"Pennation_Angle_{trial + 1}", n_muscle)
+        tendon_force_k = SX.sym(f"Tendon_Force_{trial + 1}", n_muscle)
+        fiber_force_k = SX.sym(f"Fiber_Force_{trial + 1}", n_muscle)
 
-        w0_k = np.concatenate([mesured_fiber_length,mesured_pennation_angle,mesured_tendon_length]) # zero-based indexing
-        w_k = vertcat( fiber_length_k, pennation_angle_k,tendon_length_k)
+        w0_k = np.concatenate([estimated_tendon_force,estimated_fiber_force,mesured_fiber_length,mesured_pennation_angle,mesured_tendon_length]) # zero-based indexing
+        w_k = vertcat( tendon_force_k,fiber_force_k,fiber_length_k, pennation_angle_k,tendon_length_k)
 
         # Append to global variables
         w += [w_k]
         w0 += list(w0_k)
         lbw += list(w0_k * 0.1)
-        ubw += list(w0_k * 1.2)
+        ubw += list(w0_k * 3)
 
         # Form the input vector K
         k = vertcat(a_trial, mtu_length, up)
 
         # Muscle-tendon equilibrium constraints
-        # unknown = vertcat(tendon_length, fiber_length, pennation_angle)
-        #     known = vertcat(a, l_mtu, muscleTendonParameters)
         constraints = casadi_function['equilibriumError'](w_k, k)
         g += [constraints]
-        lbg += [0] * 9
-        ubg += [0] * 9
+        lbg += [0] * 15
+        ubg += [0] * 15
 
-        #rooted_variables = casadi_function['equilibrateMuscleTendon'](w_k, k)
-        #all_states = vertcat(SX(neuromusculoskeletal_state_num.tolist()), rooted_variables)
-
-        all_states = vertcat(SX(neuromusculoskeletal_state_num.tolist()), w_k)
+        all_states_nlp = vertcat(SX(neuromusculoskeletal_state_trial.tolist()), w_k)
 
         # Simulate torque and compute errors
-        torque_simulated = casadi_function['getJointMoment'](all_states, unknown_parameters)
+        torque_simulated = casadi_function['getJointMomentNLP'](all_states_nlp, unknown_parameters)
 
         e_torque_trials = mesured_torque - torque_simulated
         e_fiber_trials = mesured_fiber_length - fiber_length_k
@@ -1433,6 +1492,16 @@ def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_paramet
     ubw = np.array(ubw, dtype=float)
     lbg = np.array(lbg, dtype=float)
     ubg = np.array(ubg, dtype=float)
+
+    J = jacobian(g,w)
+    sparcity_dense = np.array(J.sparsity())
+    zero_index = np.where(sparcity_dense == 0)
+
+    J2 = jacobian(j,w)
+    sparcity_dense2 = np.array(J2.sparsity())
+    zero_index2 = np.where(sparcity_dense2 == 0)
+
+    J2.is_zero()
 
     if np.any(np.isnan(w0)):
         print('NaNs found in w0 at indices:', np.where(np.isnan(w0)))
@@ -1464,6 +1533,8 @@ def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_paramet
         cost = sol['f'].full().item()
 
         param_opt = w_opt[:12]
+        # temp_Function = Function('temp_Function', [w],[g])
+        # temp_Function(w_opt)
 
         err_param = abs(muscle_tendon_parameters_num - param_opt)
 
@@ -1480,3 +1551,7 @@ def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_paramet
         print(f"φo : {param_opt[3:6]}")
         print(f"Fom : {param_opt[6:9]}")
         print(f"ℓst  : {param_opt[9:12]}")
+
+        xopt = param_opt[0:12]
+
+    return xopt
