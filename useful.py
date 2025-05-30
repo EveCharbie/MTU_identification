@@ -1184,8 +1184,9 @@ def hypotetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casad
     # ========= 1 Muscle-Tendon Architecture Equations   ========= #
     # ========= 1.1 Musculo skeletical configuration during trial(input)   ========= #
     qknee = np.linspace(0, 90, 5)  # example knee angles
+    qankle = np.linspace(-20, 30, 5)  # example ankle angles
+
     qknee = np.deg2rad(qknee)
-    qankle = np.linspace(-20, 30, 10)  # example ankle angles
     qankle = np.deg2rad(qankle)
 
     # ========= 1.2 Neuronal activation(input)   ========= #
@@ -1260,9 +1261,12 @@ def hypotetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casad
                     ntrialsSucceds += 1
                     # 2.6 ankle torque
                     # rooted_variables = [fiber length, pennation angle and tendon lenght]
-                    rooted_variables = np.array([x_opt_tibialis[0, 0], x_opt_soleus[0, 0], x_opt_gastrocnemius[0, 0],
-                                                 x_opt_tibialis[1, 0], x_opt_soleus[1, 0], x_opt_gastrocnemius[1, 0],
-                                                 x_opt_tibialis[2, 0], x_opt_soleus[2, 0], x_opt_gastrocnemius[2, 0]]).flatten()
+
+                    rooted_fiber_length = np.array([x_opt_tibialis[0, 0], x_opt_soleus[0, 0], x_opt_gastrocnemius[0, 0]]).flatten()
+                    rooted_pennation_angle = np.array([x_opt_tibialis[1, 0], x_opt_soleus[1, 0], x_opt_gastrocnemius[1, 0]]).flatten()
+                    rooted_tendon_length = np.array([x_opt_tibialis[2, 0], x_opt_soleus[2, 0], x_opt_gastrocnemius[2, 0]]).flatten()
+
+                    rooted_variables = np.concatenate([rooted_fiber_length, rooted_pennation_angle, rooted_tendon_length])
 
                     all_state = np.concatenate([neuromusculoskeletal_state_num, rooted_variables])
 
@@ -1309,7 +1313,7 @@ def hypotetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casad
 def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function,data,opts,initial_guess):
     print('test')
     n_muscle = 3 # Number of muscle in our model[TibialisAnterior, Soleus, Gastrocnemius]
-    n_trials = 40 # Number of trials selected for the estimation of muscle tendon parameters
+    n_trials = 500 # Number of trials selected for the estimation of muscle tendon parameters
     muscle_tendon_parameters_num = np.array(muscle_tendon_parameters_num)
     initial_guess = np.array(initial_guess)
 
