@@ -32,7 +32,7 @@ q1 = 0 # x coord pelvis [ to do ]
 q2 = 0 # y coord pelvis [ to do ]
 q3 = 0 # z coord pelvis [ to do ]
 q4 = 0 # phi angle pelvis [ to do ]
-q5 = 80# phi angle knee
+q5 = 80 # phi angle knee
 q6 = 30 # phi angle ankle
 
 # convert deg in rad
@@ -49,7 +49,7 @@ a_num = [0.2, # activation tibialis
          0.2, # activation soleus
          0.2] # activation gast
 
-#useful.test_model(skeleton_num,muscle_tendon_parameters_num,casadi_function,a_num,q_num)
+# useful.test_model(skeleton_num,muscle_tendon_parameters_num,casadi_function,a_num,q_num) #ok
 
 #     2.bis test the neuromusculo model - interactive
 ##########################################################################
@@ -73,6 +73,6 @@ df.to_excel(excel_path, index=False)
 
 #    4. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)
 ##########################################################################
-#opts = 'chosen'
+opts = 'chosen'
 initial_guess = np.array(muscle_tendon_parameters_num) * np.random.uniform(0.8, 1.2)
 useful.nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function,hypotetical_data,'chosen',initial_guess)

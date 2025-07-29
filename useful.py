@@ -488,12 +488,10 @@ def de_groote_function():
     normalized_fiber_force_velocity = 1.0  # Assuming velocity = 0
 
         # === Total Force ===
-    normalized_fiber_force = (
-            a * fiber_active_force_length * normalized_fiber_force_velocity
+    fiber_force = (
+            fiber_active_force_length * normalized_fiber_force_velocity
             + fiber_passive_force
     )
-
-    fiber_force = normalized_fiber_force * maximalIsometricForce
 
     # ========= 2.5  Casadi functions about model Muscle-Tendon Forces   ========= #
     neuromusculoskeletal_state = vertcat(a, q, musculoskeletal)
@@ -507,8 +505,16 @@ def de_groote_function():
         ['tendon_force']
     )
 
-    getMuscleForce = Function(
-        'getMuscleForce',
+    getTendonLengthening = Function(
+        'getTendonLengthening',
+        [all_states, muscleTendonParameters],
+        [tendon_lengthening],
+        ['all_states', 'muscle_tendon_parameters'],
+        ['tendon_lengthening']
+    )
+
+    getFiberForce = Function(
+        'getFiberForce',
         [all_states, muscleTendonParameters],
         [fiber_force],
         ['all_states', 'muscle_tendon_parameters'],
@@ -523,16 +529,16 @@ def de_groote_function():
         ['NormalizedTendonForce']
     )
 
-    getMusclePassiveForce = Function(
-        'getMusclePassiveForce',
+    getFiberPassiveForce = Function(
+        'getFiberPassiveForce',
         [all_states, muscleTendonParameters],
         [fiber_passive_force],
         ['all_states', 'muscle_tendon_parameters'],
         ['FiberPassiveForce']
     )
 
-    getMuscleActiveForce = Function(
-        'getMuscleActiveForce',
+    getFiberActiveForce = Function(
+        'getFiberActiveForce',
         [all_states, muscleTendonParameters],
         [fiber_active_force_length],
         ['all_states', 'muscle_tendon_parameters'],
@@ -582,6 +588,9 @@ def de_groote_function():
                         # ========= 3. equilibrium functions   ========= #
 
     # ========= 3.3.1 single muscle   ========= #
+    # three constraints function
+    # (g5,g6,g7 : equilbrium length, equilbruim architecture, equilibrium in force)
+
         # === input ==
     l_mtu = SX.sym('UMT_length', nMuscles)
 
@@ -686,7 +695,9 @@ def de_groote_function():
     )
 
                                 # ========= 4. Computing Joint Moments and Angles    ========= #
-    joint_torque = moment_arm * ((tendon_force + fiber_force * cos(pennation_angle)) / 2)
+    #joint_torque = moment_arm * (((tendon_force + fiber_force * cos(pennation_angle)) / 2))
+    joint_torque = moment_arm * tendon_force
+
     joint_torque = sum1(joint_torque[:,-1:])
 
     getJointMoment = Function(
@@ -733,10 +744,11 @@ def de_groote_function():
         "forwardKinematics": forwardKinematics ,
         "getMTULength": getMTULength,
         "getMomentArm": getMomentArm,
+        "getTendonLengthening": getTendonLengthening,
         "getTendonForce": getTendonForce,
-        "getMuscleForce": getMuscleForce,
-        "getMusclePassiveForce": getMusclePassiveForce,
-        "getMuscleActiveForce": getMuscleActiveForce,
+        "getFiberForce": getFiberForce,
+        "getFiberPassiveForce": getFiberPassiveForce,
+        "getFiberActiveForce": getFiberActiveForce,
         "normalizeTendonForce": normalizeTendonForce,
         "normalizeTendonLength": normalizeTendonLength,
         "normalizeFiberLength": normalizeFiberLength,
@@ -810,9 +822,12 @@ def test_model(skeleton_num,muscle_tendon_parameters_num,casadi_function,a_num,q
 
     all_state = np.concatenate([neuromusculoskeletal_state_num, rooted_variables])
 
+    tendon_lengthenin = casadi_function['getTendonLengthening'](all_state, muscle_tendon_parameters_num)
+
     tendon_force = casadi_function['getTendonForce'](all_state, muscle_tendon_parameters_num)
-    muscle_passive_force = casadi_function['getMusclePassiveForce'](all_state, muscle_tendon_parameters_num)
-    muscle_active_force = casadi_function['getMuscleActiveForce'](all_state, muscle_tendon_parameters_num)
+    fiber_force = casadi_function['getFiberForce'](all_state, muscle_tendon_parameters_num)
+    fiber_passive_force = casadi_function['getFiberPassiveForce'](all_state, muscle_tendon_parameters_num)
+    fiber_active_force = casadi_function['getFiberActiveForce'](all_state, muscle_tendon_parameters_num)
 
     ankle_torque = casadi_function['getJointMoment'](all_state, muscle_tendon_parameters_num)
 
@@ -837,16 +852,21 @@ def test_model(skeleton_num,muscle_tendon_parameters_num,casadi_function,a_num,q
     print(f'soleus: {float(tendon_force[1]):.4f} N')
     print(f'gastrocnemius: {float(tendon_force[2]):.4f} N')
 
-    print('\n   muscle force:')
-    print('     - muscle passive force:')
-    print(f'tibialis: {float(muscle_passive_force[0]):.4f} N')
-    print(f'soleus: {float(muscle_passive_force[1]):.4f} N')
-    print(f'gastrocnemius: {float(muscle_passive_force[2]):.4f} N')
+    print('\n   fiber force:')
+    print('     - fiber force:')
+    print(f'tibialis: {float(fiber_force[0]):.4f} N')
+    print(f'soleus: {float(fiber_force[1]):.4f} N')
+    print(f'gastrocnemius: {float(fiber_force[2]):.4f} N')
 
-    print('     - muscle active force:')
-    print(f'tibialis: {float(muscle_active_force[0]):.4f} N')
-    print(f'soleus: {float(muscle_active_force[1]):.4f} N')
-    print(f'gastrocnemius: {float(muscle_active_force[2]):.4f} N')
+    print('     - fiber passive force:')
+    print(f'tibialis: {float(fiber_passive_force[0]):.4f} N')
+    print(f'soleus: {float(fiber_passive_force[1]):.4f} N')
+    print(f'gastrocnemius: {float(fiber_passive_force[2]):.4f} N')
+
+    print('     - fiber active force:')
+    print(f'tibialis: {float(fiber_active_force[0]):.4f} N')
+    print(f'soleus: {float(fiber_active_force[1]):.4f} N')
+    print(f'gastrocnemius: {float(fiber_active_force[2]):.4f} N')
 
     print('\n   joint torque:')
     print(f'ankle moment: {float(ankle_torque[0]):.4f} N.m')
@@ -1016,8 +1036,9 @@ def interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_functio
         all_state = np.concatenate([neuromusculoskeletal_state_num, rooted_variables])
 
         tendon_force = casadi_function['getTendonForce'](all_state, muscle_tendon_parameters_num)
-        muscle_passive_force = casadi_function['getMusclePassiveForce'](all_state, muscle_tendon_parameters_num)
-        muscle_active_force = casadi_function['getMuscleActiveForce'](all_state, muscle_tendon_parameters_num)
+        fiber_force = casadi_function['getFiberForce'](all_state, muscle_tendon_parameters_num)
+        fiber_passive_force = casadi_function['getFiberPassiveForce'](all_state, muscle_tendon_parameters_num)
+        fiber_active_force = casadi_function['getFiberActiveForce'](all_state, muscle_tendon_parameters_num)
 
         ankle_torque = casadi_function['getJointMoment'](all_state, muscle_tendon_parameters_num)
 
@@ -1041,16 +1062,21 @@ def interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_functio
         print(f'soleus: {float(tendon_force[1]):.4f} N')
         print(f'gastrocnemius: {float(tendon_force[2]):.4f} N')
 
-        print('\n   muscle force:')
-        print('     - muscle passive force:')
-        print(f'tibialis: {float(muscle_passive_force[0]):.4f} N')
-        print(f'soleus: {float(muscle_passive_force[1]):.4f} N')
-        print(f'gastrocnemius: {float(muscle_passive_force[2]):.4f} N')
+        print('\n   fiber force:')
+        print('     - fiber force:')
+        print(f'tibialis: {float(fiber_force[0]):.4f} N')
+        print(f'soleus: {float(fiber_force[1]):.4f} N')
+        print(f'gastrocnemius: {float(fiber_force[2]):.4f} N')
 
-        print('     - muscle active force:')
-        print(f'tibialis: {float(muscle_active_force[0]):.4f} N')
-        print(f'soleus: {float(muscle_active_force[1]):.4f} N')
-        print(f'gastrocnemius: {float(muscle_active_force[2]):.4f} N')
+        print('     - fiber passive force:')
+        print(f'tibialis: {float(fiber_passive_force[0]):.4f} N')
+        print(f'soleus: {float(fiber_passive_force[1]):.4f} N')
+        print(f'gastrocnemius: {float(fiber_passive_force[2]):.4f} N')
+
+        print('     - fiber active force:')
+        print(f'tibialis: {float(fiber_active_force[0]):.4f} N')
+        print(f'soleus: {float(fiber_active_force[1]):.4f} N')
+        print(f'gastrocnemius: {float(fiber_active_force[2]):.4f} N')
 
         print('\n   joint torque:')
         print(f'ankle moment: {float(ankle_torque[0]):.4f} N.m')
@@ -1116,11 +1142,11 @@ def root_muscle_dynamics(a,lmtu,parameters,muscle_name,casadi_function):
 
     Description:
     This function attempts to solve the equilibrium condition of a single muscle-tendon unit
-    using a root-finding algorithm. It allows up to `max_attempts` (default: 50) to find a
+    using a root-finding algorithm. It allows up to `max_attempts` (default: 100) to find a
     solution where all residuals fall below a defined tolerance (`lim_residuals`). If successful,
     it returns the solution and the status. The process and results are printed for each attempt.
     """
-    lim_residuals = 1e-7
+    lim_residuals = 1e-8
     equilibrium_status = 'fail'
     max_attempts = 100
     attempt = 0
