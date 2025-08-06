@@ -651,12 +651,35 @@ def de_groote_function():
             opts_newtonSM
         )
 
-
-
-
         # ========= 3.3.2 all muscle   ========= #
-        # === input ==
-    l_mtu = SX.sym('UMT_length', nMuscles)
+        # === 3 constraints by muscle ==
+
+        unknown = vertcat(fiber_length, pennation_angle, tendon_length)
+        known = vertcat(a, l_mtu, optimalFiberLength, phi0, maximalIsometricForce, tendonSlackLength)
+
+        equilibriumErrorThree = Function(
+            'equilibriumErrorThree',
+            [unknown, known],
+            [vertcat(g5, g6, g7)],
+            ['x', 'p'],
+            ['residuals'],
+        )
+
+        opts_newton = {
+            "abstol": 1e-8,
+            "max_iter": 1000,
+            "error_on_fail": False,
+            "print_iteration": True,
+        }
+
+        equilibrateMuscleTendonThree = rootfinder(
+            'equilibrateMuscleTendonThree',
+            'newton',
+            equilibriumErrorThree,
+            opts_newton
+        )
+
+        # === 5 constraints by muscle ==
     tendon_force_SX = SX.sym('tendon_force', nMuscles)
     fiber_force_SX = SX.sym('muscle_force', nMuscles)
 
@@ -707,12 +730,13 @@ def de_groote_function():
         ['all_states', 'muscle_tendon_parameters'],
         ['joint_torque']
     )
+
     # ========= 4. Computing Joint Moments and Angles    ========= #
     opimization_variables = vertcat(tendon_force_SX,fiber_force_SX,fiber_length,pennation_angle,tendon_length)
     all_states_nlp = vertcat(neuromusculoskeletal_state, opimization_variables)
 
     getJointMomentNLP = Function(
-        'getJointMoment',
+        'getJointMomentNLP',
         [all_states_nlp, muscleTendonParameters],
         [joint_torque],
         ['all_states_nlp', 'muscle_tendon_parameters'],
@@ -757,6 +781,8 @@ def de_groote_function():
         "representationTendonForce": representationTendonForce,
         "equilibriumError": equilibriumError,
         "equilibrateMuscleTendon": equilibrateMuscleTendon,
+        "equilibriumErrorThree": equilibriumErrorThree,
+        "equilibrateMuscleTendonThree": equilibrateMuscleTendonThree,
         "equilibriumErrorSingleMuscle": equilibriumErrorSingleMuscle,
         "equilibrateMuscleTendonSingleMuscle": equilibrateMuscleTendonSingleMuscle,
         "getJointMoment": getJointMoment,
@@ -1469,6 +1495,17 @@ def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_paramet
         # Compute UMT length
         mtu_length = casadi_function['getMTULength'](musculoskeletal_states_trial)
 
+        """
+        ################################################################################################################
+        #                                   equilibrium with 5 constraints function as
+        #     g3 = tendon_force_SX - tendon_force
+        #     g4 = fiber_force_SX - fiber_force
+        #     g5 = l_mtu - (np.cos(pennation_angle) * fiber_length + tendon_length)
+        #     g6 = (optimalFiberLength * np.sin(phi0)) - (fiber_length * np.sin(pennation_angle))
+        #     g7 = fiber_force_SX * np.cos(pennation_angle) - tendon_force_SX
+        # 15 constraints at total
+        ################################################################################################################
+
         # Define decision variables for the trial: rooted_variables = (tendon force, muscle force, tendon length, fiber length, pennation angle)
         tendon_length_k = SX.sym(f"Tendon_Length_{trial + 1}", n_muscle)
         fiber_length_k = SX.sym(f"Fiber_Length_{trial + 1}", n_muscle)
@@ -1498,6 +1535,44 @@ def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_paramet
 
         # Simulate torque and compute errors
         torque_simulated = casadi_function['getJointMomentNLP'](all_states_nlp, unknown_parameters)
+        ################################################################################################################
+        """
+
+        ################################################################################################################
+        #                                   equilibrium with 3 constraints function as
+        #     g5 = l_mtu - (np.cos(pennation_angle) * fiber_length + tendon_length)
+        #     g6 = (optimalFiberLength * np.sin(phi0)) - (fiber_length * np.sin(pennation_angle))
+        #     g7 = fiber_force * np.cos(pennation_angle) - tendon_force
+        # 9 constraints at total
+        ################################################################################################################
+        # Define decision variables for the trial: rooted_variables = (tendon force, muscle force, tendon length, fiber length, pennation angle)
+        tendon_length_k = SX.sym(f"Tendon_Length_{trial + 1}", n_muscle)
+        fiber_length_k = SX.sym(f"Fiber_Length_{trial + 1}", n_muscle)
+        pennation_angle_k = SX.sym(f"Pennation_Angle_{trial + 1}", n_muscle)
+
+        w0_k = np.concatenate([mesured_fiber_length,mesured_pennation_angle,mesured_tendon_length]) # zero-based indexing
+        w_k = vertcat( fiber_length_k, pennation_angle_k,tendon_length_k)
+
+        # Append to global variables
+        w += [w_k]
+        w0 += list(w0_k)
+        lbw += list(w0_k * 0.1)
+        ubw += list(w0_k * 3)
+
+        # Form the input vector K
+        k = vertcat(a_trial, mtu_length, up)
+
+        # Muscle-tendon equilibrium constraints
+        constraints = casadi_function['equilibriumErrorThree'](w_k, k)
+        g += [constraints]
+        lbg += [0] * 9
+        ubg += [0] * 9
+
+        all_states = vertcat(SX(neuromusculoskeletal_state_trial.tolist()), w_k) # changer le nom de la fonction
+
+        # Simulate torque and compute errors
+        torque_simulated = casadi_function['getJointMoment'](all_states, unknown_parameters)
+        ################################################################################################################
 
         e_torque_trials = mesured_torque - torque_simulated
         e_fiber_trials = mesured_fiber_length - fiber_length_k

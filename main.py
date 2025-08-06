@@ -74,5 +74,5 @@ df.to_excel(excel_path, index=False)
 #    4. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)
 ##########################################################################
 opts = 'chosen'
-initial_guess = np.array(muscle_tendon_parameters_num) # * np.random.uniform(0.9, 1.1)
-useful.nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function,hypotetical_data[0:6,:],'chosen',initial_guess)
+initial_guess = np.array(muscle_tendon_parameters_num) * np.random.uniform(0.95, 1.05)
+useful.nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function,hypotetical_data,'chosen',initial_guess)
