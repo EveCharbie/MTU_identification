@@ -1263,11 +1263,17 @@ def hypotetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casad
     # Muscle activation [Tibialis Anterior, Soleus, Gastrocnemius]
     a_num = np.array([
         [0, 0, 0],
+        [0, 0.1, 0.1],
         [0, 0.2, 0.2],
+        [0, 0.3, 0.3],
         [0, 0.4, 0.4],
+        [0, 0.5, 0.5],
         [0, 0.6, 0.6],
+        [0.1, 0, 0],
         [0.2, 0, 0],
+        [0.3, 0, 0],
         [0.4, 0, 0],
+        [0.5, 0, 0],
         [0.6, 0, 0]
     ])
 
@@ -1505,9 +1511,9 @@ def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_paramet
         j += sum1(w_angle * e_pennation_trials ** 2)
 
         # Store errors
-        e_torque.append(e_torque_trials) #err between mesured and estimated torque (cost function)
-        e_fiber.append(e_fiber_trials) #err between mesured and estimated fiber length (cost function)
-        e_pennation.append(e_pennation_trials) # err between mesured and estimated pennation angle (cost function)
+        e_torque.append(e_torque_trials) #err between measured and estimated torque (cost function)
+        e_fiber.append(e_fiber_trials) #err between measured and estimated fiber length (cost function)
+        e_pennation.append(e_pennation_trials) # err between measured and estimated pennation angle (cost function)
 
     w = vertcat(*w)
     g = vertcat(*g)
@@ -1581,3 +1587,142 @@ def nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_paramet
         xopt = param_opt[0:12]
 
     return xopt
+
+def simulation_(q_ankle,q_knee,a_tibialis,a_soleus,a_gastrocnemius,skeleton_num, muscle_tendon_parameters_num, casadi_function):
+    """ simulation_
+   .
+    rooted = vertcat(tendon_force,muscle_force,tendon_length, fiber_length, pennation_angle)
+
+
+           Returns:
+               simd_data = (np.ndarray): Shape (16,ntrials) including
+               [torque,
+               fiber_force_tibialis, fiber_force_soleus, fiber_force_gastrocnemius,
+               fiber_active_force_tibialis, fiber_active_force_soleus, fiber_force_active_gastrocnemius,
+               fiber_passive_force_tibialis, fiber_passive_force_soleus, fiber_passive_force_gastrocnemius,
+               fiber_length_tibialis, fiber_length_soleus, fiber_length_gastrocnemius,
+               pennation_angle_tibialis, pennation_angle_soleus, pennation_angle_gastrocnemius]
+   """
+
+    header = ['torque',
+               'fiber_force_tibialis', 'fiber_force_soleus', 'fiber_force_gastrocnemius',
+               'fiber_active_force_tibialis', 'fiber_active_force_soleus', 'fiber_force_active_gastrocnemius',
+               'fiber_passive_force_tibialis', 'fiber_passive_force_soleus', 'fiber_passive_force_gastrocnemius',
+               'fiber_length_tibialis', 'fiber_length_soleus', 'fiber_length_gastrocnemius',
+               'pennation_angle_tibialis', 'pennation_angle_soleus', 'pennation_angle_gastrocnemius']
+
+    output_length = len(header)
+
+    ntrialsFail = 0 # compteur of trials non - optimized(p > 10e-5)
+    ntrialsSucceds = 0 # compteur of trials optimized(p > 10e-5)
+
+    # ========= 1 Muscle-Tendon Architecture Equations   ========= #
+    # ========= 1.1 Musculo skeletical configuration during trial(input)   ========= #
+
+    q_knee = np.deg2rad(q_knee)
+    q_ankle = np.deg2rad(q_ankle)
+
+    # ========= 1.2 Neuronal activation(input)   ========= #
+    # Muscle activation [Tibialis Anterior, Soleus, Gastrocnemius]
+
+    # ========= 1.3 Muscle Tendon Parameters(ℓom, φo, Fom, ℓst)(input)   ========= #
+    muscle_tendon_parameters_ta = np.array(muscle_tendon_parameters_num)[[0, 3, 6, 9]]
+    muscle_tendon_parameters_sol = np.array(muscle_tendon_parameters_num)[[1, 4, 7, 10]]
+    muscle_tendon_parameters_gast =np.array(muscle_tendon_parameters_num)[[2, 5, 8, 11]]
+
+    # ========= 2.1 data generator   ========= #
+    ntrials = len(q_ankle)
+    hypotetical_data = np.zeros((ntrials, 16))
+
+    trials = 0
+
+    for i in range(ntrials):  # for each frame
+        # 2.1 Progression
+        trials += 1
+        percent = round(trials / ntrials, 2)
+        print(f"Progressing: {percent * 100:.0f} %")
+
+
+        # 2.2 Neuromusculoskeletal configuration
+        a_num = [a_tibialis,a_soleus,a_gastrocnemius]
+        q_num = [0, 0, 0, 0, q_knee[i], q_ankle[i]]
+        musculoskeletal_states_num = q_num + list(skeleton_num)
+        neuromusculoskeletal_state_num = np.concatenate([a_num, musculoskeletal_states_num])
+
+        # 2.3 UMT length
+        mtu_length = casadi_function['getMTULength'](musculoskeletal_states_num)
+        mtu_length_tibialis = float(mtu_length[0])
+        mtu_length_soleus = float(mtu_length[1])
+        mtu_length_gastrocnemius = float(mtu_length[2])
+
+        # 2.4 muscle activities
+        a_tibialis_current = a_num[0]
+        a_soleus_current = a_num[1]
+        a_gastrocnemius_current = a_num[2]
+
+        # 2.5 Solver
+        x_opt_tibialis, state_tibialis = root_muscle_dynamics(a_tibialis,
+                                                              mtu_length_tibialis,
+                                                              muscle_tendon_parameters_ta,
+                                                              'tibialis',
+                                                              casadi_function)
+
+        x_opt_soleus, state_soleus = root_muscle_dynamics(a_soleus,
+                                                          mtu_length_soleus,
+                                                          muscle_tendon_parameters_sol,
+                                                          'soleus',
+                                                          casadi_function)
+
+        x_opt_gastrocnemius, state_gastrocnemius = root_muscle_dynamics(a_gastrocnemius,
+                                                                        mtu_length_gastrocnemius,
+                                                                        muscle_tendon_parameters_gast,
+                                                                        'gastrocnemius',
+                                                                        casadi_function)
+
+        if state_tibialis == 'fail' or state_soleus == 'fail' or state_tibialis == 'fail' or state_gastrocnemius == 'fail':
+            ntrialsFail += 1
+            #current_simulated_data = None(output_lengtht)
+        else:
+            ntrialsSucceds += 1
+            rooted_fiber_length = np.array(
+                [x_opt_tibialis[0, 0], x_opt_soleus[0, 0], x_opt_gastrocnemius[0, 0]]).flatten()
+            rooted_pennation_angle = np.array(
+                [x_opt_tibialis[1, 0], x_opt_soleus[1, 0], x_opt_gastrocnemius[1, 0]]).flatten()
+            rooted_tendon_length = np.array(
+                [x_opt_tibialis[2, 0], x_opt_soleus[2, 0], x_opt_gastrocnemius[2, 0]]).flatten()
+
+            rooted_variables = np.concatenate([rooted_fiber_length, rooted_pennation_angle, rooted_tendon_length])
+
+            all_state = np.concatenate([neuromusculoskeletal_state_num, rooted_variables])
+
+            #fiber_force
+            #fiber_active_force
+            #fiber_passive_force
+
+            tendon_force = casadi_function['getTendonForce'](all_state, muscle_tendon_parameters_num)
+            ankle_torque = casadi_function['getJointMoment'](all_state, muscle_tendon_parameters_num)
+
+            # 2.7 extract variable
+            # rooted = vertcat(tendon length,fiber lenght,,pennationAngle)
+            tibialis_fiber_length = float(x_opt_tibialis[0])
+            tibialis_pennation_angle = x_opt_tibialis[1]
+            tibialis_pennation_angle = float(np.rad2deg(tibialis_pennation_angle))
+            tibialis_tendon_length = float(x_opt_tibialis[2])
+
+            soleus_fiber_length = float(x_opt_soleus[0])
+            soleus_pennation_angle = x_opt_soleus[1]
+            soleus_pennation_angle = float(np.rad2deg(soleus_pennation_angle))
+            soleus_tendon_length = float(x_opt_soleus[2])
+
+            gastrocnemius_fiber_length = float(x_opt_gastrocnemius[0])
+            gastrocnemius_pennation_angle = x_opt_gastrocnemius[1]
+            gastrocnemius_pennation_angle = float(np.rad2deg(gastrocnemius_pennation_angle))
+            gastrocnemius_tendon_length = float(x_opt_gastrocnemius[2])
+
+            # 2.output
+    current_simulated_data = []
+    #sim_data = [sim_data,current_simulated_data]
+    sim_data = []
+    print('\n================== hypotetical data generator state ==================')
+    print(f"fail trials: {(ntrialsFail / ntrials) * 100:.2f} %")
+    return header, sim_data
