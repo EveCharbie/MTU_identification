@@ -523,7 +523,7 @@ def get_model_equation(param_config=None, fixed_values=None, n_muscles=3):
         }
     if fixed_values is None:
         fixed_values = {
-            'kt': 3.0,
+            'kt': 35,
             'km': 4.0,
         }
 

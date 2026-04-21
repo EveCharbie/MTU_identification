@@ -46,7 +46,6 @@ skeleton_num, muscle_tendon_parameters_num = import_functions.get_model_osim_sca
 #       - and electromechanical delay (a(t) = e(t))
 casadi_function, unknown_parameters, definition = useful.get_model_equation()
 
-
 #     2. test the neuro-musculo-skeletal model
 ##########################################################################
 q1 = 0 # x coord pelvis [ to do ]
