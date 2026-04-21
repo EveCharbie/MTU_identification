@@ -233,7 +233,7 @@ def add_tendon_length_to_data(data, skeleton_num, casadi_function):
         musculoskeletal_states_num = np.concatenate((q, skeleton_num))
 
         # Calculer les longueurs MTU (muscle-tendon unit)
-        mtu_length = casadi_function['getMTULength'](musculoskeletal_states_num)
+        mtu_length = casadi_function['get_mtu_length'](musculoskeletal_states_num)
         mtu_length_ta = float(mtu_length[0])
         mtu_length_sol = float(mtu_length[1])
         mtu_length_gast = float(mtu_length[2])
