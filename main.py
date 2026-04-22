@@ -5,9 +5,9 @@ import import_functions
 import manipfun
 import useful
 
-#################################################
+#############################################################################
 #     1. Organized path and files in a dictionary
-#################################################
+#############################################################################
 current_folder =  os.getcwd()
 measured_data_folder = os.path.join(current_folder, "num_data")
 subject_name = 'BOC_09'
@@ -18,12 +18,13 @@ folders = {
     "main":current_folder,
     "fun": os.path.join(current_folder, "pyFun"),
     "osim_model": os.path.join(current_folder, "osimModel"),
-    "measured_data": os.path.join(measured_data_folder, subject_name)
+    "measured_data": os.path.join(measured_data_folder, subject_name),
+    "sim_data": os.path.join(current_folder, "simulatedData"),
 }
 
-#################################################
+#############################################################################
 #     2. neuro-musculo-skeletal: generic model
-#################################################
+#############################################################################
 """
         # 2.1 neuro-musculo-skeletal (ℓom, φo, Fom, ℓst)
 # 2.1.1 Import from Opensim Musculoskeletal Geometry and Generic Muscle Tendon Parameters
@@ -116,9 +117,9 @@ useful.test_model(skeleton_num,muscle_tendon_parameters_num,casadi_function,a_nu
 # 2.2.5 interactive model test
 useful.interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_function)
 """
-#################################################
+#############################################################################
 #     3. neuro-musculo-skeletal: scaled model
-#################################################
+#############################################################################
 """
         # 3.1 neuro-musculo-skeletal (ℓom, φo, Fom, ℓst)
 # 3.1.1 Import from Opensim Musculoskeletal Geometry and Generic Muscle Tendon Parameters
@@ -217,10 +218,11 @@ useful.interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_func
 useful.plot_force_length(0,1,[1,1,1,1],casadi_function)
 """
 
-
+#############################################################################
 #    4. hypothetical data generator
-##########################################################################
-
+#############################################################################
+"""
+"""
 # 4.1.1 Import from Opensim Musculoskeletal Geometry and Generic Muscle Tendon Parameters
 mtu_params=['l0m', 'phi0', 'f0m', 'lst']
 
@@ -240,73 +242,103 @@ header, hypothetical_data = useful.hypothetical_data_generator(skeleton_num, mus
 # 4.3 visualization
 manipfun.plot_data(hypothetical_data, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
 
-#    5. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)
-##########################################################################
-# 5.1 get data and add tendon length
-hypothetical_data = manipfun.add_tendon_length_to_data(hypothetical_data,skeleton_num, casadi_function)
+# 4.4 save data in an Excel file
+useful.save_data_to_xlsx(hypothetical_data,header,folders["sim_data"],'dataset_hypothetical')
 
-#  5.2 set the initial guess according to the test data
+#############################################################################
+#    5. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)
+#                           NUMERIC VALIDATION
+#############################################################################
+# 5.1. import the model
+# 5.1.1 Import from Opensim Musculoskeletal Geometry and Generic Muscle Tendon Parameters
+mtu_params=['l0m', 'phi0', 'f0m', 'lst']
+
+# 5.1.2 Scrape from .osim file geometry of bodies and muscle-tendon parameters
+skeleton_num, muscle_tendon_parameters_num = import_functions.get_model_osim_scaled(folders["measured_data"], f"{subject_name}.osim",mtu_params = mtu_params)
+
+# 5.1.3 Get kinematic and dynamic equations (muscle tendon equation from De
+# Groote) --> Hill type model --> Fmt = f(a, ℓmt, νmt; Fom, ℓom, ℓst, φo).
+# Note that in our model we ignore :
+#       - fiber contraction velocity (νmt = 1)
+#       - and electromechanical delay (a(t) = e(t))
+casadi_function, unknown_parameters, definition = useful.get_model_equation()
+
+# 5.2 get data
+"""
+# 5.2.1 files name
+simulated_data_folder_name = os.path.join(folders["sim_data"], 'dataset_hypothetical.xlsx')
+
+# 5.2.2 import data
+hypothetical_data = manipfun.import_data_from_excel(simulated_data_folder_name)
+
+# 5.2.3 add tendon length
+hypothetical_data = manipfun.add_tendon_length_to_data(hypothetical_data,skeleton_num, casadi_function)
+"""
+# 5.2.4 plot datas (verif)
+manipfun.plot_data(hypothetical_data, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
+
+#  5.3 set the initial guess according to the test data
 initial_guess, upper_band, lower_band = manipfun.get_initial_guess(muscle_tendon_parameters_num, hypothetical_data)
 
-#  5.3 optimisation problem with perfect initial gess
-muscle_tendon_parameters_opt = useful.optimization_nlp(hypothetical_data,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
+#  5.4 optimisation problem with perfect initial gess
+useful.nlp_verification(hypothetical_data,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
+"""
+muscle_tendon_parameters_opt_xO_parf = useful.optimization_nlp(hypothetical_data,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
 
-#  5.4 generate data with the optimized parameter
+#  5.5 generate data with the optimized parameter
 header, hypothetical_data_opt, path_csv = useful.generate_estimated_data(hypothetical_data, skeleton_num, muscle_tendon_parameters_opt,
                             casadi_function,
                             output_dir='data_generic', filename='data_estime_generic.csv',
                             save_npy=False, save_csv=False, verbose=True)
 
 
-#  5.5 optimisation problem with initial gess according to our methods
-muscle_tendon_parameters_opt = useful.optimization_nlp(hypothetical_data,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
+#  5.6 optimisation problem with initial gess according to our methods
+muscle_tendon_parameters_opt_x0_rand = useful.optimization_nlp(hypothetical_data,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
 
-#  5.6 generate data with the optimized parameter
+
+#  5.7 generate data with the optimized parameter
 header, hypothetical_data_opt, path_csv = useful.generate_estimated_data(hypothetical_data, skeleton_num, muscle_tendon_parameters_opt,
                             casadi_function,
                             output_dir='data_generic', filename='data_estime_generic.csv',
                             save_npy=False, save_csv=False, verbose=True)
 
 manipfun.plot_data(hypothetical_data_opt, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
-
+"""
 rng = np.random.default_rng(seed=42)
 
 hypothetical_data_noise = useful.add_noise(
     hypothetical_data,
-    sigma_torque=0.15,
-    sigma_length=0.003,
-    sigma_angle_deg=2.5,
+    sigma_torque=0.5,
+    sigma_length=0.002,
+    sigma_angle_deg=2,
     add_internal_noise=True,
     rng=rng,
 )
 
-muscle_tendon_parameters_opt = useful.optimization_nlp(hypothetical_data_noise,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
+muscle_tendon_parameters_opt_bruit = useful.optimization_nlp(hypothetical_data_noise,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
 
+from monte_carlo_identification import main as run_mc
 
+results = run_mc(
+    data_clean=hypothetical_data,  # tes données PROPRES (sans bruit) — le script ajoute le bruit
+    initial_guess=initial_guess,
+    lower_band=lower_band,
+    upper_band=upper_band,
+    skeleton_num=skeleton_num,
+    muscle_tendon_parameters_num=muscle_tendon_parameters_num,
+    unknown_parameters=unknown_parameters,
+    casadi_function=casadi_function,
+    optimization_nlp=useful.optimization_nlp,
+    cfg={"n_mc": 50},  # ou {"n_mc": 30} pour commencer plus vite
+)
 """
-# 4.3 save data (do a file with 
-# Save path
-save_dir = os.path.join(folders['main'])
-os.makedirs(save_dir, exist_ok=True)
-
-# Convert to a DataFrame
-df = pd.DataFrame(hypothetical_data, columns=header)
-
-# Save to Excel
-excel_path = os.path.join(save_dir, "hypothetical_data.xlsx")
-df.to_excel(excel_path, index=False)
-
-
-#    4. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)
-##########################################################################
-opts = 'chosen'
-initial_guess = np.array(muscle_tendon_parameters_num) * np.random.uniform(0.91, 1.09)
-useful.nlp_identification(skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function,hypothetical_data,'chosen',initial_guess)
 """
-
-
-#    5. train and test
-##########################################################################
+#############################################################################
+#    6. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)
+#                           EXPERIMENTAL VALIDATION
+#                               train and test
+#############################################################################
+"""
 osim_path, train_path, test_path = manipfun.select_folder_and_get_files() #  get the interest folder
 
 #  get the name of the osim files
@@ -357,11 +389,11 @@ manipfun.plot_data(data_test, muscle_names=['tibialis', 'soleus', 'gastrocnemius
 
 
 
-
 """
-#    6. Simulation based on (skeleton_num, muscle_tendon_parameters_num, casadi_function,time_num, q5_num, q6_num, aTibialis_num, aSoleus_num, aGastrocnemius_num)
-##########################################################################
-
+#############################################################################
+#    7. Simulation based on (skeleton_num, muscle_tendon_parameters_num, casadi_function,time_num, q5_num, q6_num, aTibialis_num, aSoleus_num, aGastrocnemius_num)
+#############################################################################
+"""
 # find measured data
 ##########################
 measured_data_folder_name = os.path.join(folders["measured_data"], trial_name + '.xlsx')
