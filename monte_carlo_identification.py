@@ -32,13 +32,13 @@ import io
 CONFIG = {
     # Number of Monte-Carlo realisations
     # 30 is a minimum; 100+ is recommended for stable statistics
-    "n_mc": 50,
+    "n_mc": 30,
 
     # Noise standard deviations (adapt to your instruments)
     # Default values are typical for ultrasound + isokinetic dynamometer
-    "sigma_torque": 0.5,       # N.m
+    "sigma_torque": 0.2,       # N.m
     "sigma_fiber": 0.002,      # m  (2 mm — ultrasound fiber length)
-    "sigma_pennation": np.deg2rad(2.0),  # rad (2°)
+    "sigma_pennation": np.deg2rad(1.5),  # rad (2°)
     "sigma_tendon": 0.003,     # m  (3 mm — ultrasound tendon length)
 
     # Reproducibility

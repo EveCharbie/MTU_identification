@@ -41,9 +41,9 @@ def get_skeleton():
         from casadi import cos, sin
         tx, ty, tz = translation[0], translation[1], translation[2]
         trans_matrix = SX.zeros(4, 4)
-        trans_matrix[0, 0] = cos(theta);
+        trans_matrix[0, 0] = cos(theta)
         trans_matrix[0, 1] = -sin(theta)
-        trans_matrix[1, 0] = sin(theta);
+        trans_matrix[1, 0] = sin(theta)
         trans_matrix[1, 1] = cos(theta)
         trans_matrix[0, 3] = tx
         trans_matrix[1, 3] = ty
@@ -213,8 +213,8 @@ def get_fiber_passive_force_length(normalized_fiber_length, k_fiber, maximal_iso
 
 def get_tendon_force_length(normalized_tendon_length, k_tendon, maximal_isometric_force):
     # Tendon force-length (S1)
-    c1 = 0.200;
-    c2 = 0.995;
+    c1 = 0.200
+    c2 = 0.995
     c3 = 0.250  # tendon parameters
 
     normalized_tendon_force_part_1 = 0
@@ -1127,11 +1127,12 @@ def hypothetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casa
 
     # ========= 1 Muscle-Tendon Architecture Equations   ========= #
     # ========= 1.1 Musculo skeletal configuration during trial(input)   ========= #
-    qknee = np.linspace(0, 80, 2)  # example knee angles
-    qankle = np.linspace(-25, 20, 5)  # example ankle angles
+    """
+    q_knee = np.linspace(0, 80, 2)  # example knee angles
+    q_ankle = np.linspace(-25, 20, 5)  # example ankle angles
 
-    qknee = np.deg2rad(qknee)
-    qankle = np.deg2rad(qankle)
+    q_knee = np.deg2rad(q_knee)
+    q_ankle = np.deg2rad(q_ankle)
 
     # ========= 1.2 Neuronal activation(input)   ========= #
     # Muscle activation [Tibialis Anterior, Soleus, Gastrocnemius]
@@ -1143,95 +1144,104 @@ def hypothetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casa
         [0, 0.4, 0.4],
         [0, 0.5, 0.5],
         [0, 0.6, 0.6],
+        [0, 0.9, 0.9],
+        [0, 0.1, 0.1],
+        [0, 0.2, 0.2],
+        [0, 0.3, 0.3],
+        [0, 0.4, 0.4],
+        [0, 0.5, 0.5],
+        [0, 0.6, 0.6],
+        [0, 0.9, 0.9],
         [0.1, 0, 0],
         [0.2, 0, 0],
         [0.3, 0, 0],
         [0.4, 0, 0],
         [0.5, 0, 0],
-        [0.6, 0, 0]
+        [0.6, 0, 0],
+        [0.9, 0, 0]
     ])
+    """
+    q_knee, q_ankle, a_num = build_protocol(ramp_levels=np.array([0.1, 0.2, 0.3, 0.4, 0.9]),
+                   passive_step=1.0,
+                   to_radians=True)
 
 
     # ========= 2.1 data generator   ========= #
-    n_trials = len(a_num) * len(qknee) * len(qankle)
+    n_trials = len(a_num)
     hypothetical_data = np.zeros((n_trials, 15))
 
     trials = 0
 
-    for i in range(len(a_num)):  # for each muscle activation
-        for ii in range(len(qknee)):  # for each knee angle
-            for iii in range(len(qankle)):  # for each ankle angle
-                # 2.1 Progression
-                trials += 1
-                percent = round(trials / n_trials, 2)
-                print(f"Progressing: {percent * 100:.0f} %")
+    for i in range(n_trials):  # for each measure
+        # 2.1 Progression
+        trials += 1
+        percent = round(trials / n_trials, 2)
+        print(f"Progressing: {percent * 100:.0f} %")
 
-                # 2.2 Neuromusculoskeletal configuration
-                q_num = [0, 0, 0, 0, qknee[ii], qankle[iii]]
-                musculoskeletal_states_num = q_num + list(skeleton_num)
-                neuromusculoskeletal_state_num = np.concatenate([a_num[i], musculoskeletal_states_num])
+        # 2.2 Neuromusculoskeletal configuration
+        q_num = [0, 0, 0, 0, q_knee[i], q_ankle[i]]
+        musculoskeletal_states_num = q_num + list(skeleton_num)
+        neuromusculoskeletal_state_num = np.concatenate([a_num[i], musculoskeletal_states_num])
 
-                # 2.3 UMT length
-                mtu_length = casadi_function['get_mtu_length'](musculoskeletal_states_num)
+        # 2.3 UMT length
+        mtu_length = casadi_function['get_mtu_length'](musculoskeletal_states_num)
 
+        results = solve_all_muscles(a_num[i], mtu_length, muscle_tendon_parameters_num, casadi_function)
 
-                results = solve_all_muscles(a_num[i], mtu_length, muscle_tendon_parameters_num, casadi_function)
+        x_opt_tibialis = results['tibialis']['x_opt']
+        x_opt_soleus = results['soleus']['x_opt']
+        x_opt_gastrocnemius = results['gastrocnemius']['x_opt']
+        # rooted_variables = [fiber length, pennation angle and tendon length]
 
-                x_opt_tibialis = results['tibialis']['x_opt']
-                x_opt_soleus = results['soleus']['x_opt']
-                x_opt_gastrocnemius = results['gastrocnemius']['x_opt']
-                # rooted_variables = [fiber length, pennation angle and tendon length]
+        state_tibialis = results['tibialis']['state']
+        state_soleus = results['soleus']['state']
+        state_gastrocnemius = results['gastrocnemius']['state']
 
-                state_tibialis = results['tibialis']['state']
-                state_soleus = results['soleus']['state']
-                state_gastrocnemius = results['gastrocnemius']['state']
+        if state_tibialis == 'fail' or state_soleus == 'fail' or state_tibialis == 'fail' or state_gastrocnemius == 'fail':
+            n_trials_fail += 1
+        else:
+            n_trials_succeeds += 1
 
-
-
-                if state_tibialis == 'fail' or state_soleus == 'fail' or state_tibialis == 'fail' or state_gastrocnemius == 'fail':
-                    n_trials_fail += 1
-                else:
-                    n_trials_succeeds += 1
-
-                    rooted_fiber_length = np.array(
-                        [x_opt_tibialis[0, 0], x_opt_soleus[0, 0], x_opt_gastrocnemius[0, 0]]).flatten()
-                    rooted_pennation_angle = np.array(
-                        [x_opt_tibialis[1, 0], x_opt_soleus[1, 0], x_opt_gastrocnemius[1, 0]]).flatten()
-                    rooted_tendon_length = np.array(
-                        [x_opt_tibialis[2, 0], x_opt_soleus[2, 0], x_opt_gastrocnemius[2, 0]]).flatten()
+            rooted_fiber_length = np.array(
+                [x_opt_tibialis[0, 0], x_opt_soleus[0, 0], x_opt_gastrocnemius[0, 0]]).flatten()
+            rooted_pennation_angle = np.array(
+                [x_opt_tibialis[1, 0], x_opt_soleus[1, 0], x_opt_gastrocnemius[1, 0]]).flatten()
+            rooted_tendon_length = np.array(
+                [x_opt_tibialis[2, 0], x_opt_soleus[2, 0], x_opt_gastrocnemius[2, 0]]).flatten()
 
 
-                    rooted_variables = np.array([x_opt_tibialis[0, 0], x_opt_soleus[0, 0], x_opt_gastrocnemius[0, 0],
-                                                 x_opt_tibialis[1, 0], x_opt_soleus[1, 0], x_opt_gastrocnemius[1, 0],
-                                                 x_opt_tibialis[2, 0], x_opt_soleus[2, 0],
-                                                 x_opt_gastrocnemius[2, 0]]).flatten()
+            rooted_variables = np.array([x_opt_tibialis[0, 0], x_opt_soleus[0, 0], x_opt_gastrocnemius[0, 0],
+                                         x_opt_tibialis[1, 0], x_opt_soleus[1, 0], x_opt_gastrocnemius[1, 0],
+                                         x_opt_tibialis[2, 0], x_opt_soleus[2, 0],
+                                         x_opt_gastrocnemius[2, 0]]).flatten()
 
-                    all_state = np.concatenate([neuromusculoskeletal_state_num, rooted_variables])
+            all_state = np.concatenate([neuromusculoskeletal_state_num, rooted_variables])
 
-                    ankle_torque = casadi_function['get_joint_moment'](all_state, muscle_tendon_parameters_num)
+            ankle_torque = casadi_function['get_joint_moment'](all_state, muscle_tendon_parameters_num)
 
-                    # 2.7 extract variable
-                    # rooted = vertcat(tendon length,fiber lenght,,pennationAngle)
-                    tibialis_fiber_length = float(x_opt_tibialis[0])
-                    tibialis_pennation_angle = float(x_opt_tibialis[1])
-                    tibialis_tendon_length = float(x_opt_tibialis[2])
+            # 2.7 extract variable
+            # rooted = vertcat(tendon length,fiber lenght,,pennationAngle)
+            tibialis_fiber_length = float(x_opt_tibialis[0])
+            tibialis_pennation_angle = float(x_opt_tibialis[1])
+            tibialis_tendon_length = float(x_opt_tibialis[2])
 
-                    soleus_fiber_length = float(x_opt_soleus[0])
-                    soleus_pennation_angle = float(x_opt_soleus[1])
-                    soleus_tendon_length = float(x_opt_soleus[2])
+            soleus_fiber_length = float(x_opt_soleus[0])
+            soleus_pennation_angle = float(x_opt_soleus[1])
+            soleus_tendon_length = float(x_opt_soleus[2])
 
-                    gastrocnemius_fiber_length = float(x_opt_gastrocnemius[0])
-                    gastrocnemius_pennation_angle = float(x_opt_gastrocnemius[1])
-                    gastrocnemius_tendon_length = float(x_opt_gastrocnemius[2])
+            gastrocnemius_fiber_length = float(x_opt_gastrocnemius[0])
+            gastrocnemius_pennation_angle = float(x_opt_gastrocnemius[1])
+            gastrocnemius_tendon_length = float(x_opt_gastrocnemius[2])
 
-                    hypothetical_data[n_trials_succeeds - 1] = [
-                        float(ankle_torque),
-                        qknee[ii], qankle[iii],
-                        float(a_num[i, 0]), float(a_num[i, 1]), float(a_num[i, 2]),
-                        tibialis_fiber_length, soleus_fiber_length, gastrocnemius_fiber_length,
-                        tibialis_pennation_angle, soleus_pennation_angle, gastrocnemius_pennation_angle,
-                        tibialis_tendon_length, soleus_tendon_length, gastrocnemius_tendon_length
-                    ]
+            hypothetical_data[n_trials_succeeds - 1] = [
+                float(ankle_torque),
+                q_knee[i], q_ankle[i],
+                float(a_num[i, 0]), float(a_num[i, 1]), float(a_num[i, 2]),
+                tibialis_fiber_length, soleus_fiber_length, gastrocnemius_fiber_length,
+                tibialis_pennation_angle, soleus_pennation_angle, gastrocnemius_pennation_angle,
+                tibialis_tendon_length, soleus_tendon_length, gastrocnemius_tendon_length
+            ]
+
     hypothetical_data = hypothetical_data[0:n_trials_succeeds]
 
     hypothetical_data = hypothetical_data.T
@@ -1240,261 +1250,120 @@ def hypothetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casa
 
     return header, hypothetical_data
 
-def nlp_identification(skeleton_num, muscle_tendon_parameters_num, unknown_parameters, casadi_function, data, opts,
-                       initial_guess):
-    """ root muscle tendon parameter (ℓom, φo, Fom, ℓst)
-   .
-    skeleton_num: .osim scale squeleton
-    muscle_tendon_parameters_num: 
-    unknown_parameters
-    casadi_function
-    data
-    opts
-    initial_guess
+def build_protocol(ramp_levels=np.array([0.1, 0.2, 0.3, 0.4, 0.9]),
+                   passive_step=1.0,
+                   coact_jitter=0.03,
+                   to_radians=True,
+                   seed=0):
+    """
+    Construit le protocole expérimental complet en fusionnant les 3 sous-protocoles.
 
-           Returns:
-               xopt (np.ndarray): Shape (12,ntrials) (ℓom, φo, Fom, ℓst)
+    Protocole 1 : Mobilisation passive
+        q_knee = 0°, q_ankle ∈ [-25°, 20°] (pas = passive_step), a_num = [0, 0, 0]
 
-   """
+    Protocole 2 : Rampes isométriques, genou tendu (q_knee = 0°)
+        q_ankle ∈ {-25, -10, 0, 10, 20}
+        - Dorsiflexion  : [a, 0, 0]   (tibialis seul)
+        - Flexion plantaire, série A : a_sol = ramp_levels (nominal)
+                                       a_gast ≈ ramp_levels (jitter ±coact_jitter)
+          -> [0, a_sol, a_gast]
+        - Flexion plantaire, série B : a_gast = ramp_levels (nominal)
+                                       a_sol ≈ ramp_levels (jitter ±coact_jitter)
+          -> [0, a_sol, a_gast]
 
-    xopt = []
-    n_muscle = 3  # Number of muscle in our model[TibialisAnterior, Soleus, Gastrocnemius]
-    n_trials = 20  # Number of trials selected for the estimation of muscle tendon parameters
-    muscle_tendon_parameters_num = np.array(muscle_tendon_parameters_num)
-    initial_guess = np.array(initial_guess)
+    Protocole 3 : Rampes en dorsiflexion, genou fléchi
+        q_knee = 90°, q_ankle ∈ {0, -25}, a_num = [a, 0, 0]
 
-    # ============ 2. Selection of trials  ============ #
-    # ============ 2.1 Interst  ============ #
-    if opts == 'random':  # (Random seletion)
-        selection = np.random.randint(1, data.shape[0], n_trials)
-        selection.sort()
-        data = data[selection]
+    Paramètres
+    ----------
+    ramp_levels  : array, niveaux nominaux d'activation des rampes
+    passive_step : float, pas angulaire (°) du protocole passif
+    coact_jitter : float, amplitude max du décalage (±) pour le muscle co-activé
+                   (ex. 0.03 -> valeurs dans [nominal - 0.03, nominal + 0.03])
+    to_radians   : bool, convertit les angles en radians si True
+    seed         : int, graine pour la reproductibilité du jitter
 
-    elif opts == 'chosen':
-        n_trials = data.shape[0]
+    Retourne
+    --------
+    q_knee  : (N,) array
+    q_ankle : (N,) array
+    a_num   : (N, 3) array — [tibialis, soléaire, gastrocnémien]
+    """
 
-    # ============ 3. NLP configuration  ============ #
-    # ============ 3.1 NLP set Up ============ #
-    # Initialize variables
-    w = []  # decision variables
-    w0 = []  # initial guess
-    lbw = []  # lower bounds
-    ubw = []  # upper bounds
-    j = 0  # cost function
-    g = []  # constraints
-    lbg = []  # lower bounds for constraints
-    ubg = []  # upper bounds for constraints
+    rng = np.random.default_rng(seed)
 
-    # Unknown parameter vector concatenation
-    up = unknown_parameters
+    def _jitter(levels):
+        """Décale légèrement chaque niveau autour de sa valeur nominale."""
+        noise = rng.uniform(-coact_jitter, coact_jitter, size=levels.shape)
+        return np.clip(levels + noise, 0.0, 1.0)
 
-    e_torque = []
-    e_fiber = []
-    e_pennation = []
+    # ---------- Protocol 1 : passive mobilization ---------- #
+    qk_P1 = np.array([0.0])
+    qa_P1 = np.arange(-25, 20 + passive_step, passive_step, dtype=float)
+    a_P1  = np.array([[0.0, 0.0, 0.0]])
 
-    # Create muscle parameters variables
-    w += [up]
-    w0 += list(initial_guess)  # transpose to match shapes
-    lbw += list(initial_guess * 0.05)
-    ubw += list(initial_guess * 3)
+    # ---------- Protocol 2 : isometric ramp, knee extended ---------- #
+    qk_P2 = np.array([0.0])
+    qa_P2 = np.array([-25.0, -10.0, 0.0, 10.0, 20.0])
 
-    # Weightings in cost function
-    w_torque = 1  # Nm
-    w_length = 0.005  # Nm/mm
-    w_angle = (3 / 180) * np.pi  # radians
+    # Dorsiflexion : tibialis (echo sur le tibialis)
+    a_P2_DF = np.column_stack([ramp_levels,
+                               np.zeros_like(ramp_levels),
+                               np.zeros_like(ramp_levels)])
 
-    # NLP formulation
-    for trial in range(n_trials):
-        # Extract measured data
-        data_trials = data[trial, :]
-        a_trial = data_trials[3:6]
-        q_trial = [0, 0, 0, 0] + list(np.deg2rad(data_trials[1:3]))
+    # Plantar flexion, série A : solear nominal, gastroc jitteré (echo sur le gastroc)
+    a_P2_PF_A = np.column_stack([np.zeros_like(ramp_levels),
+                                 ramp_levels,
+                                 _jitter(ramp_levels)])
 
-        mesured_torque = data_trials[0]
-        mesured_fiber_length = data_trials[6:9]
-        mesured_pennation_angle = np.deg2rad(data_trials[9:12])  # mesured in deg but in rad in NLP
-        mesured_tendon_length = data_trials[12:15]
+    # Plantar flexion,, série B : gastroc nominal, solear jitteré (echo sur le solear)
+    a_P2_PF_B = np.column_stack([np.zeros_like(ramp_levels),
+                                 _jitter(ramp_levels),
+                                 ramp_levels])
 
-        estimated_tendon_force = np.array(
-            casadi_function['get_tendon_force_from_tendon_length'](mesured_tendon_length, initial_guess)).flatten()
-        estimated_fiber_force = np.array(
-            casadi_function['get_fiber_force_from_fiber_length'](a_trial, mesured_fiber_length,
-                                                                 initial_guess)).flatten()
+    a_P2 = np.vstack([a_P2_DF, a_P2_PF_A, a_P2_PF_B])   # 5 + 5 + 5 = 15 level mesured
 
-        musculoskeletal_states_trial = q_trial + list(skeleton_num)
-        neuromusculoskeletal_state_trial = np.concatenate([a_trial, musculoskeletal_states_trial])
+    # ---------- Protocol 3 : isometric ramp, knee flexed ---------- # (echo sur le gastroc)
+    qk_P3 = np.array([90.0])
+    qa_P3 = np.array([0.0, -25.0])
+    a_P3  = np.column_stack([np.zeros_like(ramp_levels),
+                             _jitter(ramp_levels),
+                             ramp_levels])
 
-        # Compute UMT length
-        mtu_length = casadi_function['get_mtu_length'](musculoskeletal_states_trial)
+    # ---------- Product cartésien par Protocol ---------- #
+    def _cartesian(qk, qa, a):
+        QK, QA, A_idx = np.meshgrid(qk, qa, np.arange(len(a)), indexing='ij')
+        return QK.ravel(), QA.ravel(), a[A_idx.ravel()]
 
-        """
-        ################################################################################################################
-        #                                   equilibrium with 5 constraints function as
-        #     g3 = tendon_force_SX - tendon_force
-        #     g4 = fiber_force_SX - fiber_force
-        #     g5 = l_mtu - (np.cos(pennation_angle) * fiber_length + tendon_length)
-        #     g6 = (optimal_fiber_length * np.sin(phi0)) - (fiber_length * np.sin(pennation_angle))
-        #     g7 = fiber_force_SX * np.cos(pennation_angle) - tendon_force_SX
-        # 15 constraints at total
-        ################################################################################################################
+    qk1, qa1, a1 = _cartesian(qk_P1, qa_P1, a_P1)
+    qk2, qa2, a2 = _cartesian(qk_P2, qa_P2, a_P2)
+    qk3, qa3, a3 = _cartesian(qk_P3, qa_P3, a_P3)
 
-        # Define decision variables for the trial: rooted_variables = (tendon force, muscle force, tendon length, fiber length, pennation angle)
-        tendon_length_k = SX.sym(f"Tendon_Length_{trial + 1}", n_muscle)
-        fiber_length_k = SX.sym(f"Fiber_Length_{trial + 1}", n_muscle)
-        pennation_angle_k = SX.sym(f"Pennation_Angle_{trial + 1}", n_muscle)
-        tendon_force_k = SX.sym(f"Tendon_Force_{trial + 1}", n_muscle)
-        fiber_force_k = SX.sym(f"Fiber_Force_{trial + 1}", n_muscle)
+    # ---------- Fusion ---------- #
+    q_knee  = np.concatenate([qk1, qk2, qk3])
+    q_ankle = np.concatenate([qa1, qa2, qa3])
+    a_num   = np.vstack([a1, a2, a3])
 
-        w0_k = np.concatenate([estimated_tendon_force,estimated_fiber_force,mesured_fiber_length,mesured_pennation_angle,mesured_tendon_length]) # zero-based indexing
-        w_k = vertcat( tendon_force_k,fiber_force_k,fiber_length_k, pennation_angle_k,tendon_length_k)
+    if to_radians:
+        q_knee  = np.deg2rad(q_knee)
+        q_ankle = np.deg2rad(q_ankle)
 
-        # Append to global variables
-        w += [w_k]
-        w0 += list(w0_k)
-        lbw += list(w0_k * 0.1)
-        ubw += list(w0_k * 3)
+    return q_knee, q_ankle, a_num
 
-        # Form the input vector K
-        k = vertcat(a_trial, mtu_length, up)
 
-        # Muscle-tendon equilibrium constraints
-        constraints = casadi_function['equilibriumError'](w_k, k)
-        g += [constraints]
-        lbg += [0] * 15
-        ubg += [0] * 15
+# ============================================================ #
+#                       UTILISATION
+# ============================================================ #
+q_knee, q_ankle, a_num = build_protocol()
 
-        all_states_nlp = vertcat(SX(neuromusculoskeletal_state_trial.tolist()), w_k)
+n_trials = len(q_knee)
+hypothetical_data = np.zeros((n_trials, 15))
 
-        # Simulate torque and compute errors
-        torque_simulated = casadi_function['get_joint_momentNLP'](all_states_nlp, unknown_parameters)
-        ################################################################################################################
-        """
+print(f"Nombre total d'essais : {n_trials}")
+print(f"q_knee  shape : {q_knee.shape}")
+print(f"q_ankle shape : {q_ankle.shape}")
+print(f"a_num   shape : {a_num.shape}")
 
-        ################################################################################################################
-        #                                   equilibrium with 3 constraints function as
-        #     g5 = l_mtu - (np.cos(pennation_angle) * fiber_length + tendon_length)
-        #     g6 = (optimal_fiber_length * np.sin(phi0)) - (fiber_length * np.sin(pennation_angle))
-        #     g7 = fiber_force * np.cos(pennation_angle) - tendon_force
-        # 9 constraints at total
-        ################################################################################################################
-        # Define decision variables for the trial: rooted_variables = (tendon force, muscle force, tendon length, fiber length, pennation angle)
-        fiber_length_k = SX.sym(f"Fiber_Length_{trial + 1}", n_muscle)
-        pennation_angle_k = SX.sym(f"Pennation_Angle_{trial + 1}", n_muscle)
-        tendon_length_k = SX.sym(f"Tendon_Length_{trial + 1}", n_muscle)
-
-        w0_k = np.concatenate(
-            [mesured_fiber_length, mesured_pennation_angle, mesured_tendon_length])  # zero-based indexing
-        w_k = vertcat(fiber_length_k, pennation_angle_k, tendon_length_k)
-
-        # Append to global variables
-        w += [w_k]
-        w0 += list(w0_k)
-        lbw += list(w0_k * 0.8)
-        ubw += list(w0_k * 1.2)
-
-        # Form the input vector K
-        k = vertcat(a_trial, mtu_length, up)
-
-        # Muscle-tendon equilibrium constraints
-        constraints = casadi_function['equilibrium_error_all_muscle'](w_k, k)
-        g += [constraints]
-        lbg += [0] * 9
-        ubg += [0] * 9
-
-        all_states = vertcat(SX(neuromusculoskeletal_state_trial.tolist()), w_k)  # changer le nom de la fonction
-
-        # Simulate torque and compute errors
-        torque_simulated = casadi_function['get_joint_moment'](all_states, unknown_parameters)
-        ################################################################################################################
-
-        e_torque_trials = mesured_torque - torque_simulated
-        e_fiber_trials = mesured_fiber_length - fiber_length_k
-        e_pennation_trials = mesured_pennation_angle - pennation_angle_k
-
-        # Update cost
-        # j_trials = w_torque * sqrt(e_torque_trials**2) + sum1(w_length * sqrt(e_fiber_trials**2)) + sum1(w_angle * sqrt(e_pennation_trials**2))
-        # j += [j_trials]
-        j += w_torque * e_torque_trials ** 2
-        j += sum1(w_length * e_fiber_trials ** 2)
-        j += sum1(w_angle * e_pennation_trials ** 2)
-
-        # Store errors
-        e_torque.append(e_torque_trials)  # err between measured and estimated torque (cost function)
-        e_fiber.append(e_fiber_trials)  # err between measured and estimated fiber length (cost function)
-        e_pennation.append(e_pennation_trials)  # err between measured and estimated pennation angle (cost function)
-
-    w = vertcat(*w)
-    g = vertcat(*g)
-    print("J shape:", j.shape)
-
-    w0 = np.array(w0, dtype=float)
-    lbw = np.array(lbw, dtype=float)
-    ubw = np.array(ubw, dtype=float)
-    lbg = np.array(lbg, dtype=float)
-    ubg = np.array(ubg, dtype=float)
-
-    J = jacobian(g, w)
-    sparcity_dense = np.array(J.sparsity())
-    zero_index = np.where(sparcity_dense == 0)
-
-    J2 = jacobian(j, w)
-    sparcity_dense2 = np.array(J2.sparsity())
-    zero_index2 = np.where(sparcity_dense2 == 0)
-
-    J2.is_zero()
-
-    if np.any(np.isnan(w0)):
-        print('NaNs found in w0 at indices:', np.where(np.isnan(w0)))
-    if np.any(np.isinf(w0)):
-        print('Infs found in w0 at indices:', np.where(np.isinf(w0)))
-    if not (np.any(np.isnan(w0)) or np.any(np.isinf(w0))):
-        print('w0 is valid')
-        # ============ NLP solver ============ #
-        # "x" opt parameters, 'f' function to minimized, 'g' contraint function
-        nlp = {'x': w,
-               'f': j,
-               'g': g
-               }
-
-        solver = nlpsol('solver', 'ipopt', nlp)
-
-        print(solver)
-
-        # Solve the NLP
-        sol = solver(
-            x0=w0,
-            lbx=lbw,
-            ubx=ubw,
-            lbg=lbg,
-            ubg=ubg
-        )
-        # Extract solution
-        w_opt = sol['x'].full().flatten()
-        cost = sol['f'].full().item()
-
-        param_opt = w_opt[:12]
-        # temp_Function = Function('temp_Function', [w],[g])
-        # temp_Function(w_opt)
-
-        err_param = abs(muscle_tendon_parameters_num - param_opt)
-
-        print("\n", "\n", "Error between Reel and Estimated Muscle-Tendon Parameters :")
-        print(f"Number of trials : {n_trials}")
-        print(f"err ℓom : {err_param[0:3]}")
-        print(f"err φo : {err_param[3:6]}")
-        print(f"err Fom : {err_param[6:9]}")
-        print(f"err ℓst  : {err_param[9:12]}")
-
-        print("Estimated Muscle-Tendon Parameters :")
-        print(f"Cost : {cost}")
-        print(f"ℓom : {param_opt[0:3]}")
-        print(f"φo : {param_opt[3:6]}")
-        print(f"Fom : {param_opt[6:9]}")
-        print(f"ℓst  : {param_opt[9:12]}")
-
-        xopt = param_opt[0:12]
-
-    return xopt
 
 def simulation_(skeleton_num, muscle_tendon_parameters_num, casadi_function, time_num, q5_num, q6_num, a_tibialis_num,
                 a_soleus_num, a_gastrocnemius_num):
@@ -1763,7 +1632,7 @@ def add_noise(data, sigma_torque=0.1, sigma_length=0.002, sigma_angle_deg=3.0,
     data[ROW_TORQUE, :] += rng.normal(0.0, sigma_torque, size=n_trials)
 
     # Angles articulaires : 2 lignes
-    data[ROW_Q, :] += rng.normal(0.0, sigma_angle_rad, size=(2, n_trials))
+    data[ROW_Q, :] += rng.normal(0.0, sigma_angle_rad/8, size=(2, n_trials))
 
     # === Bruit sur les estimations échographiques (optionnel) === #
     if add_internal_noise:
@@ -2146,7 +2015,6 @@ def nlp_verification(data, initial_guess, lower_band, upper_band, skeleton_num,
         print(f"Rootfinder a échoué : {e}")
 
 
-
 def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
                      muscle_tendon_parameters_num, unknown_parameters, casadi_function):
     """
@@ -2506,8 +2374,7 @@ def save_data_to_xlsx(data, header_data, folder, name,
     Args:
         data : np.ndarray, shape (n_features, n_trials)
         header_data : list of str — names of the rows of data.
-        folder : output directory
-        name : filename (no extension).
+        folder, name : output directory and filename (no extension).
         use_symbolic : if True, Excel headers use symbols (τ_ankle, ...).
         convert_units : if True, converts m -> cm and rad -> deg.
 
@@ -2594,3 +2461,196 @@ def save_data_to_xlsx(data, header_data, folder, name,
 
     print(f'data saved in : {excel_path}')
     return excel_path
+
+def load_data_from_xlsx(folder, name, header_data,
+                        use_symbolic=True, convert_units=True):
+    """
+    Load data matrix from Excel, reversing the transformations applied
+    by save_data_to_xlsx.
+
+    Variables listed in `header_data` but absent from the Excel file are
+    filled with NaN values, preserving the matrix shape (n_features, n_trials).
+
+    Args:
+        folder : str — directory containing the file.
+        name : str — base filename (no extension).
+        header_data : list of str — explicit names of the rows requested.
+        use_symbolic : bool, default True
+            If True, expects Excel columns to use symbolic names.
+        convert_units : bool, default True
+            If True, reverses cm -> m and deg -> rad conversion.
+
+    Returns:
+        data : np.ndarray, shape (len(header_data), n_trials)
+            Matrix with rows in the order of header_data. Missing variables
+            are filled with NaN.
+    """
+
+    SYMBOL_MAP = {
+        'ankle_torque': 'τ_ankle',
+        'q_knee': 'q_1',
+        'q_ankle': 'q_2',
+        'a_tibialis': 'a_Ta',
+        'a_soleus': 'a_sol',
+        'a_gastrocnemius': 'a_Gast',
+        'fiber_length_tibialis': 'lf_Ta^',
+        'fiber_length_soleus': 'lf_sol^',
+        'fiber_length_gastrocnemius': 'lf_Gast^',
+        'pennation_angle_tibialis': 'φ_Ta',
+        'pennation_angle_soleus': 'φ_sol',
+        'pennation_angle_gastrocnemius': 'φ_Gast',
+        'tendon_length_tibialis': 'lt_Ta',
+        'tendon_length_soleus': 'lt_sol',
+        'tendon_length_gastrocnemius': 'lt_Gast',
+    }
+
+    ANGLE_ROWS_RAD_TO_DEG = [
+        'q_knee', 'q_ankle',
+        'pennation_angle_tibialis',
+        'pennation_angle_soleus',
+        'pennation_angle_gastrocnemius',
+    ]
+    LENGTH_ROWS_M_TO_CM = [
+        'fiber_length_tibialis',
+        'fiber_length_soleus',
+        'fiber_length_gastrocnemius',
+        'tendon_length_tibialis',
+        'tendon_length_soleus',
+        'tendon_length_gastrocnemius',
+    ]
+
+    # --- Lecture du fichier Excel --- #
+    excel_path = os.path.join(folder, f"{name}.xlsx")
+    if not os.path.exists(excel_path):
+        raise FileNotFoundError(f"Excel file not found: {excel_path}")
+    df = pd.read_excel(excel_path)
+
+    # --- Reverse mapping symbole -> nom explicite --- #
+    if use_symbolic:
+        reverse_symbol_map = {sym: name for name, sym in SYMBOL_MAP.items()}
+        excel_to_explicit = {col: reverse_symbol_map.get(col, col) for col in df.columns}
+    else:
+        excel_to_explicit = {col: col for col in df.columns}
+
+    explicit_to_excel = {v: k for k, v in excel_to_explicit.items()}
+    available_explicit = set(explicit_to_excel.keys())
+
+    # --- Construction de la matrice avec NaN pour les variables manquantes --- #
+    n_trials = len(df)
+    n_features = len(header_data)
+    data = np.full((n_features, n_trials), np.nan)
+
+    missing = []
+    for i, varname in enumerate(header_data):
+        if varname in available_explicit:
+            excel_col = explicit_to_excel[varname]
+            data[i, :] = df[excel_col].to_numpy(dtype=float)
+        else:
+            missing.append(varname)
+        # sinon : ligne reste à NaN
+
+    # --- Conversion inverse d'unités (uniquement sur les lignes non-NaN) --- #
+    if convert_units:
+        for i, varname in enumerate(header_data):
+            if varname in missing:
+                continue  # ligne NaN, pas de conversion
+            if varname in ANGLE_ROWS_RAD_TO_DEG:
+                data[i, :] = np.deg2rad(data[i, :])
+            elif varname in LENGTH_ROWS_M_TO_CM:
+                data[i, :] = data[i, :] / 100.0
+
+    if missing:
+        print(f"[load_data_from_xlsx] Filled with NaN (not in file): {missing}")
+    print(f'data loaded from : {excel_path} '
+          f'({n_features - len(missing)}/{n_features} variables)')
+
+    return data
+
+def compare_datasets(data_a, data_b, header_data, label_a='A', label_b='B'):
+    """
+    Compare two data matrices row-by-row and report statistics on the
+    differences (per variable).
+
+    Parameters
+    ----------
+    data_a, data_b : np.ndarray, shape (n_features, n_trials)
+        The two datasets to compare. Must have identical shape.
+    header_data : list of str
+        Variable names corresponding to the rows of both matrices.
+    label_a, label_b : str, optional
+        Names used in the printed report (e.g. 'original', 'reloaded').
+
+    Returns
+    -------
+    pd.DataFrame
+        Per-variable statistics with columns :
+            mean_diff, std_diff, min_diff, max_diff,
+            mean_abs_diff, max_abs_diff, rmse, n_trials.
+    """
+    # --- Validations --- #
+    if data_a.shape != data_b.shape:
+        raise ValueError(
+            f"Shape mismatch: {label_a} has {data_a.shape}, "
+            f"{label_b} has {data_b.shape}."
+        )
+    if len(header_data) != data_a.shape[0]:
+        raise ValueError(
+            f"header_data has {len(header_data)} entries but matrices have "
+            f"{data_a.shape[0]} rows."
+        )
+
+    # --- Calcul des différences --- #
+    diff = data_a.astype(float) - data_b.astype(float)
+    abs_diff = np.abs(diff)
+
+    plt.imshow(diff, aspect='auto', cmap='hot')
+    plt.colorbar(label='|diff|')
+    plt.yticks(range(len(header_data)), header_data)
+    plt.xlabel('Trial')
+    plt.title('Round-trip absolute difference')
+    plt.tight_layout()
+    plt.show()
+
+    stats = pd.DataFrame({
+        'mean_diff':     diff.mean(axis=1),
+        'std_diff':      diff.std(axis=1, ddof=1) if diff.shape[1] > 1 else np.zeros(diff.shape[0]),
+        'min_diff':      diff.min(axis=1),
+        'max_diff':      diff.max(axis=1),
+        'mean_abs_diff': abs_diff.mean(axis=1),
+        'max_abs_diff':  abs_diff.max(axis=1),
+        'rmse':          np.sqrt((diff ** 2).mean(axis=1)),
+        'n_trials':      diff.shape[1],
+    }, index=header_data)
+
+    # --- Rapport console --- #
+    print(f"\n{'='*70}")
+    print(f"  Comparison : {label_a} vs {label_b}")
+    print(f"  Shape : {data_a.shape}  ({data_a.shape[0]} variables × {data_a.shape[1]} trials)")
+    print(f"{'='*70}")
+
+    # Format colonné lisible
+    with pd.option_context('display.float_format', '{:.3e}'.format,
+                           'display.max_rows', None,
+                           'display.width', 200):
+        print(stats)
+
+    # Résumé global
+    overall_max = abs_diff.max()
+    overall_mean = abs_diff.mean()
+    print(f"\nOverall max |diff| : {overall_max:.3e}")
+    print(f"Overall mean |diff|: {overall_mean:.3e}")
+
+    # Détection de divergence : variable avec la plus grande erreur relative
+    nonzero_mask = np.abs(data_a).max(axis=1) > 1e-12
+    if nonzero_mask.any():
+        rel_err = np.where(
+            nonzero_mask,
+            abs_diff.max(axis=1) / np.maximum(np.abs(data_a).max(axis=1), 1e-12),
+            0.0,
+        )
+        worst_idx = int(np.argmax(rel_err))
+        print(f"\nWorst relative error : '{header_data[worst_idx]}' "
+              f"({rel_err[worst_idx]:.3e})")
+
+    print(f"{'='*70}\n")
+    return stats

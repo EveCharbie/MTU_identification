@@ -222,7 +222,6 @@ useful.plot_force_length(0,1,[1,1,1,1],casadi_function)
 #    4. hypothetical data generator
 #############################################################################
 """
-"""
 # 4.1.1 Import from Opensim Musculoskeletal Geometry and Generic Muscle Tendon Parameters
 mtu_params=['l0m', 'phi0', 'f0m', 'lst']
 
@@ -245,6 +244,18 @@ manipfun.plot_data(hypothetical_data, muscle_names=['tibialis', 'soleus', 'gastr
 # 4.4 save data in an Excel file
 useful.save_data_to_xlsx(hypothetical_data,header,folders["sim_data"],'dataset_hypothetical')
 
+# 4.5 load data from an Excel file
+data = useful.load_data_from_xlsx(folders["sim_data"], 'dataset_hypothetical', header)
+
+# 4.6 add tendon length to data set and import test data set
+data = manipfun.add_tendon_length_to_data(data,skeleton_num, casadi_function)
+
+# 4.6 comparison
+stats = useful.compare_datasets(
+    hypothetical_data, data, header,
+    label_a='original', label_b='reloaded'
+)
+"""
 #############################################################################
 #    5. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)
 #                           NUMERIC VALIDATION
@@ -264,17 +275,21 @@ skeleton_num, muscle_tendon_parameters_num = import_functions.get_model_osim_sca
 casadi_function, unknown_parameters, definition = useful.get_model_equation()
 
 # 5.2 get data
-"""
-# 5.2.1 files name
-simulated_data_folder_name = os.path.join(folders["sim_data"], 'dataset_hypothetical.xlsx')
+# 5.2.1 load data from an Excel file
+header = [
+    'ankle_torque',
+    'q_knee', 'q_ankle',
+    'a_tibialis', 'a_soleus', 'a_gastrocnemius',
+    'fiber_length_tibialis', 'fiber_length_soleus', 'fiber_length_gastrocnemius',
+    'pennation_angle_tibialis', 'pennation_angle_soleus', 'pennation_angle_gastrocnemius',
+    'tendon_length_tibialis', 'tendon_length_soleus', 'tendon_length_gastrocnemius'
+]
+hypothetical_data = useful.load_data_from_xlsx(folders["sim_data"], 'dataset_hypothetical', header)
 
-# 5.2.2 import data
-hypothetical_data = manipfun.import_data_from_excel(simulated_data_folder_name)
-
-# 5.2.3 add tendon length
+# 5.2.2 add tendon length to data set and import test data set
 hypothetical_data = manipfun.add_tendon_length_to_data(hypothetical_data,skeleton_num, casadi_function)
-"""
-# 5.2.4 plot datas (verif)
+
+# 5.2.3 plot datas (verif)
 manipfun.plot_data(hypothetical_data, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
 
 #  5.3 set the initial guess according to the test data
@@ -282,20 +297,22 @@ initial_guess, upper_band, lower_band = manipfun.get_initial_guess(muscle_tendon
 
 #  5.4 optimisation problem with perfect initial gess
 useful.nlp_verification(hypothetical_data,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
+
 """
 muscle_tendon_parameters_opt_xO_parf = useful.optimization_nlp(hypothetical_data,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
+
 
 #  5.5 generate data with the optimized parameter
 header, hypothetical_data_opt, path_csv = useful.generate_estimated_data(hypothetical_data, skeleton_num, muscle_tendon_parameters_opt,
                             casadi_function,
                             output_dir='data_generic', filename='data_estime_generic.csv',
                             save_npy=False, save_csv=False, verbose=True)
-
+"""
 
 #  5.6 optimisation problem with initial gess according to our methods
 muscle_tendon_parameters_opt_x0_rand = useful.optimization_nlp(hypothetical_data,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
 
-
+"""
 #  5.7 generate data with the optimized parameter
 header, hypothetical_data_opt, path_csv = useful.generate_estimated_data(hypothetical_data, skeleton_num, muscle_tendon_parameters_opt,
                             casadi_function,
@@ -303,6 +320,8 @@ header, hypothetical_data_opt, path_csv = useful.generate_estimated_data(hypothe
                             save_npy=False, save_csv=False, verbose=True)
 
 manipfun.plot_data(hypothetical_data_opt, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
+"""
+
 """
 rng = np.random.default_rng(seed=42)
 
@@ -316,11 +335,12 @@ hypothetical_data_noise = useful.add_noise(
 )
 
 muscle_tendon_parameters_opt_bruit = useful.optimization_nlp(hypothetical_data_noise,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
-
+"""
+"""
 from monte_carlo_identification import main as run_mc
 
 results = run_mc(
-    data_clean=hypothetical_data,  # tes données PROPRES (sans bruit) — le script ajoute le bruit
+    data_clean=hypothetical_data,
     initial_guess=initial_guess,
     lower_band=lower_band,
     upper_band=upper_band,
@@ -332,6 +352,25 @@ results = run_mc(
     cfg={"n_mc": 50},  # ou {"n_mc": 30} pour commencer plus vite
 )
 """
+"""
+from run_identifiability import main as run_identifiability
+
+setup = dict(data=hypothetical_data,
+             initial_guess=initial_guess,
+             lower_band=lower_band,
+             upper_band=upper_band,
+             skeleton_num=skeleton_num,
+             true_params=muscle_tendon_parameters_num,
+             unknown_parameters=unknown_parameters,
+             casadi_function=casadi_function,
+             optimization_nlp=useful.optimization_nlp
+             )
+
+results = run_identifiability(
+    setup
+)
+
+
 """
 #############################################################################
 #    6. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)
@@ -386,8 +425,6 @@ header, data_est_nopt, path_csv = useful.generate_estimated_data(data_test, skel
 
 manipfun.plot_data(data_est_nopt, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
 manipfun.plot_data(data_test, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
-
-
 
 """
 #############################################################################
