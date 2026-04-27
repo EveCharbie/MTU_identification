@@ -212,9 +212,7 @@ useful.test_model(skeleton_num,muscle_tendon_parameters_num,casadi_function,a_nu
 
 # 3.2.5 interactive model test
 useful.interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_function)
-"""
 
-"""
 useful.plot_force_length(0,1,[1,1,1,1],casadi_function)
 """
 
@@ -260,6 +258,8 @@ stats = useful.compare_datasets(
 #    5. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)
 #                           NUMERIC VALIDATION
 #############################################################################
+"""
+"""
 # 5.1. import the model
 # 5.1.1 Import from Opensim Musculoskeletal Geometry and Generic Muscle Tendon Parameters
 mtu_params=['l0m', 'phi0', 'f0m', 'lst']
@@ -284,42 +284,62 @@ header = [
     'pennation_angle_tibialis', 'pennation_angle_soleus', 'pennation_angle_gastrocnemius',
     'tendon_length_tibialis', 'tendon_length_soleus', 'tendon_length_gastrocnemius'
 ]
+
 hypothetical_data = useful.load_data_from_xlsx(folders["sim_data"], 'dataset_hypothetical', header)
 
 # 5.2.2 add tendon length to data set and import test data set
 hypothetical_data = manipfun.add_tendon_length_to_data(hypothetical_data,skeleton_num, casadi_function)
-
+"""
 # 5.2.3 plot datas (verif)
 manipfun.plot_data(hypothetical_data, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
 
+
 #  5.3 set the initial guess according to the test data
-initial_guess, upper_band, lower_band = manipfun.get_initial_guess(muscle_tendon_parameters_num, hypothetical_data)
+initial_guess, upper_band, lower_band = useful.get_initial_guess(muscle_tendon_parameters_num, hypothetical_data,
+                                 strategy='scaled')
 
 #  5.4 optimisation problem with perfect initial gess
+
 useful.nlp_verification(hypothetical_data,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
 
-"""
+
 muscle_tendon_parameters_opt_xO_parf = useful.optimization_nlp(hypothetical_data,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
 
 
 #  5.5 generate data with the optimized parameter
-header, hypothetical_data_opt, path_csv = useful.generate_estimated_data(hypothetical_data, skeleton_num, muscle_tendon_parameters_opt,
+header, hypothetical_data_opt, path_csv = useful.generate_estimated_data(hypothetical_data, skeleton_num, muscle_tendon_parameters_num,
                             casadi_function,
                             output_dir='data_generic', filename='data_estime_generic.csv',
                             save_npy=False, save_csv=False, verbose=True)
-"""
+
+stats = useful.compare_datasets(
+    hypothetical_data, hypothetical_data_opt, header,
+    label_a='original', label_b='opti'
+)
+
 
 #  5.6 optimisation problem with initial gess according to our methods
-muscle_tendon_parameters_opt_x0_rand = useful.optimization_nlp(hypothetical_data,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
+initial_guess, upper_band, lower_band = useful.get_initial_guess(muscle_tendon_parameters_num, hypothetical_data,
+                                 strategy='measured')
 
-"""
+muscle_tendon_parameters_opt_x0_rand = useful.optimization_nlp(hypothetical_data,initial_guess,lower_band,upper_band,
+                                                               skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
+
+
+
 #  5.7 generate data with the optimized parameter
-header, hypothetical_data_opt, path_csv = useful.generate_estimated_data(hypothetical_data, skeleton_num, muscle_tendon_parameters_opt,
+header, hypothetical_data_opt, path_csv = useful.generate_estimated_data(hypothetical_data, skeleton_num, muscle_tendon_parameters_opt_x0_rand,
                             casadi_function,
                             output_dir='data_generic', filename='data_estime_generic.csv',
                             save_npy=False, save_csv=False, verbose=True)
 
 manipfun.plot_data(hypothetical_data_opt, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
+
+stats = useful.compare_datasets(
+    hypothetical_data, hypothetical_data_opt, header,
+    label_a='original', label_b='opti'
+)
+
 """
 
 """
@@ -377,37 +397,55 @@ results = run_identifiability(
 #                           EXPERIMENTAL VALIDATION
 #                               train and test
 #############################################################################
-"""
+
+# 6.1 Import datasets
+# 6.1.1 name of the measured data
+header = [
+    'ankle_torque',
+    'q_knee', 'q_ankle',
+    'a_tibialis', 'a_soleus', 'a_gastrocnemius',
+    'fiber_length_tibialis', 'fiber_length_soleus', 'fiber_length_gastrocnemius',
+    'pennation_angle_tibialis', 'pennation_angle_soleus', 'pennation_angle_gastrocnemius',
+    'tendon_length_tibialis', 'tendon_length_soleus', 'tendon_length_gastrocnemius'
+]
+
+# 6.1.2 get data folder
 osim_path, train_path, test_path = manipfun.select_folder_and_get_files() #  get the interest folder
 
-#  get the name of the osim files
+# 6.1.3 name and path of the files
 osim_folder, osim_name = manipfun.split_path_name(osim_path)
+train_folder, train_name = manipfun.split_path_name(train_path)
+test_folder, test_name = manipfun.split_path_name(test_path)
 
-# import the osim scaled as a python variable
+# 6.1.4 import the osim scaled as a python variable
 mtu_params=['l0m', 'phi0', 'f0m', 'lst']
-
-skeleton_num, muscle_tendon_parameters_num = import_functions.get_model_osim_scaled(folders["measured_data"], f"{subject_name}.osim",mtu_params = mtu_params)
-
+skeleton_num, muscle_tendon_parameters_num = import_functions.get_model_osim_scaled(osim_folder,osim_name,mtu_params = mtu_params)
 casadi_function, unknown_parameters, definition = useful.get_model_equation()
 
-# import training data set and import test data set
-data_train = manipfun.import_data_from_excel(train_path)
-data_test = manipfun.import_data_from_excel(test_path)
+# 6.1.5 training data set and import test data set
+data_train = useful.load_data_from_xlsx(train_folder, train_name, header)
+data_test = useful.load_data_from_xlsx(test_folder, test_name, header)
 
-# add tendon length to data set and import test data set
+# 6.1.6 add tendon length to data set and import test data set
 data_train = manipfun.add_tendon_length_to_data(data_train,skeleton_num, casadi_function)
 data_test = manipfun.add_tendon_length_to_data(data_test,skeleton_num, casadi_function)
 
-#  data verification
+# 6.1.7 data visual verification
 manipfun.plot_data(data_train, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
 
-# set the initial guess according to the test data
+# 6.2 optimization
+# 6.2.1 set the initial guess according to the test data
 initial_guess, upper_band, lower_band = manipfun.get_initial_guess(muscle_tendon_parameters_num, data_test)
 
-# optimisation problem
+
+# from dataset:
+initial_guess, upper_band, lower_band = useful.get_initial_guess(muscle_tendon_parameters_num, data_test,
+                                  strategy='measured')
+
+# 6.2.2 optimisation problem
 muscle_tendon_parameters_opt = useful.optimization_nlp(data_train,initial_guess,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
 
-# opt parameters save
+# 6.2.3 opt parameters save
 manipfun.save_muscle_tendon_parameters(muscle_tendon_parameters_opt,
                                   osim_folder,
                                   filename='muscle_tendon_parameters_saved',
@@ -415,17 +453,60 @@ manipfun.save_muscle_tendon_parameters(muscle_tendon_parameters_opt,
                                   save_csv=True,
                                   save_npy=True,
                                   verbose=True)
+"""
+
+mtu_params=['l0m', 'phi0', 'f0m','km', 'lst','kt']
+skeleton_num, muscle_tendon_parameters_num = import_functions.get_model_osim_scaled(osim_folder,osim_name,mtu_params = mtu_params)
+param_config = {
+    'l0m': 'sym',
+    'phi0': 'sym',
+    'f0m': 'sym',
+    'km': 'sym',
+    'lst': 'sym',
+    'kt': 'sym',
+}
+casadi_function, unknown_parameters, definition = useful.get_model_equation(param_config)
 
 
-# generate data with the optimized parameter
-header, data_est_nopt, path_csv = useful.generate_estimated_data(data_test, skeleton_num, muscle_tendon_parameters_num,
+initial_guess = muscle_tendon_parameters_num
+upper_band = muscle_tendon_parameters_num + muscle_tendon_parameters_num *.9
+lower_band = muscle_tendon_parameters_num - muscle_tendon_parameters_num *.9
+
+
+muscle_tendon_parameters_opt = useful.optimization_nlp(data_train,initial_guess,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
+
+
+# 6.3 test
+# 6.3.1 generate test data with the optimized parameter
+header, data_opt, path_csv = useful.generate_estimated_data(data_test, skeleton_num, muscle_tendon_parameters_opt,
+                            casadi_function,
+                            output_dir='data_generic', filename='data_estime_opt.csv',
+                            save_npy=False, save_csv=False, verbose=True)
+
+# 6.3.2 visual verification of generate test data and test data
+manipfun.plot_data(data_test, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
+manipfun.plot_data(data_opt, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
+
+# 6.3.2 differences between generate test data and measured test data
+stats = useful.compare_datasets(
+    data_test, data_opt, header,
+    label_a='original', label_b='reloaded'
+)
+
+
+
+header, data_nopt, path_csv = useful.generate_estimated_data(data_test, skeleton_num, muscle_tendon_parameters_num,
                             casadi_function,
                             output_dir='data_generic', filename='data_estime_generic.csv',
                             save_npy=False, save_csv=False, verbose=True)
 
-manipfun.plot_data(data_est_nopt, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
 manipfun.plot_data(data_test, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
+manipfun.plot_data(data_nopt, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
 
+stats = useful.compare_datasets(
+    data_test, data_est_nopt, header,
+    label_a='original', label_b='reloaded'
+)
 """
 #############################################################################
 #    7. Simulation based on (skeleton_num, muscle_tendon_parameters_num, casadi_function,time_num, q5_num, q6_num, aTibialis_num, aSoleus_num, aGastrocnemius_num)

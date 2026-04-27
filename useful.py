@@ -384,12 +384,26 @@ def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
         ['residuals'],
     )
 
+    opts = {
+        "ipopt.max_iter": 5000,
+        "ipopt.tol": 1e-3,  # tolérance principale (défaut 1e-8)
+        "ipopt.constr_viol_tol": 1e-3,  # tolérance contraintes (défaut 1e-4)
+        "ipopt.acceptable_tol": 1e-2,
+        "ipopt.acceptable_constr_viol_tol": 1e-2,
+        "ipopt.acceptable_iter": 20,
+        "ipopt.mu_strategy": "adaptive",
+        "ipopt.linear_solver": "mumps",  # ou ma57 si dispo
+        "ipopt.warm_start_init_point": "yes",
+        "ipopt.print_info_string": "yes",  # CRUCIAL pour diagnostic
+    }
+
     opts_newton_single = {
         "abstol": 1e-8,
-        "max_iter": 1000,
+        "max_iter": 5000,
         "error_on_fail": False,
         "print_iteration": False,
     }
+
     equilibrate_muscle_tendon_single_muscle = rootfinder(
         'equilibrate_muscle_tendon_single_muscle',
         'newton',
@@ -411,7 +425,7 @@ def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
 
     opts_newton_all = {
         "abstol": 1e-8,
-        "max_iter": 1000,
+        "max_iter": 5000,
         "error_on_fail": False,
         "print_iteration": False,
     }
@@ -1350,21 +1364,6 @@ def build_protocol(ramp_levels=np.array([0.1, 0.2, 0.3, 0.4, 0.9]),
 
     return q_knee, q_ankle, a_num
 
-
-# ============================================================ #
-#                       UTILISATION
-# ============================================================ #
-q_knee, q_ankle, a_num = build_protocol()
-
-n_trials = len(q_knee)
-hypothetical_data = np.zeros((n_trials, 15))
-
-print(f"Nombre total d'essais : {n_trials}")
-print(f"q_knee  shape : {q_knee.shape}")
-print(f"q_ankle shape : {q_ankle.shape}")
-print(f"a_num   shape : {a_num.shape}")
-
-
 def simulation_(skeleton_num, muscle_tendon_parameters_num, casadi_function, time_num, q5_num, q6_num, a_tibialis_num,
                 a_soleus_num, a_gastrocnemius_num):
     """ simulation_
@@ -1728,7 +1727,7 @@ def nlp_verification(data, initial_guess, lower_band, upper_band, skeleton_num,
         a_trial = data_trial[3:6]  # [0, 1]
         measured_fiber_length = data_trial[6:9]  # m
         measured_pennation_angle = data_trial[9:12]  # rad
-        mesured_tendon_length = data_trial[12:15]  # m
+        measured_tendon_length = data_trial[12:15]  # m
 
         musculoskeletal_states_trial = q_trial + list(skeleton_num)
         neuromusculoskeletal_state_trial = np.concatenate(
@@ -1745,7 +1744,7 @@ def nlp_verification(data, initial_guess, lower_band, upper_band, skeleton_num,
 
         # --- Physiological bounds (robust to sign) ---
         fl_meas = np.abs(measured_fiber_length)
-        tl_meas = np.abs(mesured_tendon_length)
+        tl_meas = np.abs(measured_tendon_length)
 
         # Fiber length: positive, around the measured value
         lb_fl = fl_meas - fl_meas * 0.3
@@ -2187,8 +2186,14 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
     print('w0 is valid')
 
     # ============ NLP solver ============ #
+
+    opts_ipopt = {
+        "ipopt.max_iter": 5000
+    }
+
     nlp = {'x': w, 'f': j, 'g': g}
-    solver = nlpsol('solver', 'ipopt', nlp)
+    solver = nlpsol('solver', 'ipopt', nlp,opts_ipopt)
+
     print(solver)
 
     sol = solver(x0=w0, lbx=lbw, ubx=ubw, lbg=lbg, ubg=ubg)
@@ -2520,7 +2525,11 @@ def load_data_from_xlsx(folder, name, header_data,
     ]
 
     # --- Lecture du fichier Excel --- #
-    excel_path = os.path.join(folder, f"{name}.xlsx")
+    if name.endswith('.xlsx'):
+        excel_path = os.path.join(folder, name)
+    else:
+        excel_path = os.path.join(folder, f"{name}.xlsx")
+
     if not os.path.exists(excel_path):
         raise FileNotFoundError(f"Excel file not found: {excel_path}")
     df = pd.read_excel(excel_path)
@@ -2654,3 +2663,285 @@ def compare_datasets(data_a, data_b, header_data, label_a='A', label_b='B'):
 
     print(f"{'='*70}\n")
     return stats
+
+import numpy as np
+
+
+def get_initial_guess(muscle_tendon_parameters_num, data,
+                       strategy='literature', verbose=True):
+    """
+    Génère initial_guess, lower_band et upper_band pour la calibration
+    muscle-tendon, avec des bornes physiologiquement cohérentes.
+
+    Stratégie de design :
+    --------------------
+    - 'literature' : bornes centrées sur les valeurs de littérature
+                     (Rajagopal 2015). Robuste aux biais de mesure.
+    - 'scaled'     : bornes centrées sur muscle_tendon_parameters_num
+                     (modèle déjà scalé sujet).
+    - 'hybrid'     : init = scaled, bornes = scaled avec garde-fous littérature.
+    - 'measured'   : bornes data-driven, basées sur les min/max des mesures
+                     écho avec marge ±10%. Utile quand le sujet a des mesures
+                     écho fiables et qu'on veut ancrer les paramètres dans
+                     l'espace réellement exploré par le mouvement.
+
+    Args:
+        muscle_tendon_parameters_num (np.ndarray): Shape (12,) - paramètres
+            de référence (typiquement issus d'un modèle scalé OpenSim).
+        data (np.ndarray): Shape (15, ntrials) - données mesurées.
+        strategy (str): 'literature', 'scaled', 'hybrid', ou 'measured'.
+        verbose (bool): affichage diagnostique.
+
+    Returns:
+        initial_guess, upper_band, lower_band : np.ndarray (12,)
+    """
+
+    # === Indices ===
+    IDX_FL  = {'ta': 6,  'sol': 7,  'gast': 8}
+    IDX_PA  = {'ta': 9,  'sol': 10, 'gast': 11}
+    IDX_TL  = {'ta': 12, 'sol': 13, 'gast': 14}
+
+    IDX_LOM = {'ta': 0, 'sol': 1, 'gast': 2}
+    IDX_PHI = {'ta': 3, 'sol': 4, 'gast': 5}
+    IDX_FOM = {'ta': 6, 'sol': 7, 'gast': 8}
+    IDX_LST = {'ta': 9, 'sol': 10, 'gast': 11}
+
+    muscles = ['ta', 'sol', 'gast']
+
+    # === Valeurs de référence (Rajagopal 2015) ===
+    LITERATURE = {
+        'lom':  {'ta': 0.0683, 'sol': 0.0440, 'gast': 0.0600},
+        'phi0': {'ta': np.deg2rad(9.6),
+                 'sol': np.deg2rad(28.3),
+                 'gast': np.deg2rad(9.9)},
+        'lst':  {'ta': 0.2230, 'sol': 0.2450, 'gast': 0.3800},
+    }
+
+    # === Bornes anatomiques absolues (garde-fous, jamais dépassées) ===
+    PHYSIO_HARD_BOUNDS = {
+        'lom':  {'ta': (0.040, 0.100), 'sol': (0.025, 0.060), 'gast': (0.035, 0.080)},
+        'phi0': {'ta': (np.deg2rad(2), np.deg2rad(20)),
+                 'sol': (np.deg2rad(15), np.deg2rad(45)),
+                 'gast': (np.deg2rad(2),  np.deg2rad(25))},
+        'lst':  {'ta': (0.180, 0.280), 'sol': (0.200, 0.300), 'gast': (0.320, 0.450)},
+    }
+
+    # === Marges (utilisées par literature/scaled/hybrid) ===
+    MARGINS = {
+        'lom':  {'low': 0.70, 'high': 1.30},
+        'phi0': {'low_rad': np.deg2rad(-10), 'high_rad': np.deg2rad(10)},
+        'fom':  {'low': 0.50, 'high': 2.5},
+        'lst':  {'low': 0.80, 'high': 1.25},
+    }
+
+    # === Marge spécifique pour la stratégie 'measured' ===
+    MEASURED_MARGIN = 0.30  # ±30% des min/max mesurés
+
+    initial_guess = np.zeros(12)
+    lower_band   = np.zeros(12)
+    upper_band   = np.zeros(12)
+
+    for m in muscles:
+
+        # ------------------------------------------------------------------
+        # STRATÉGIE 'measured' : bornes basées sur min/max des mesures ±10%
+        # ------------------------------------------------------------------
+        if strategy == 'measured':
+            # --- lom : à partir des longueurs de fibre mesurées ---
+            fl = data[IDX_FL[m], :]
+            fl = fl[~np.isnan(fl)]
+            fl_min, fl_max = np.min(fl), np.max(fl)
+            lom_lo = fl_min * (1 - MEASURED_MARGIN)
+            lom_hi = fl_max * (1 + MEASURED_MARGIN)
+
+            # init au centre
+            lom_center = 0.5 * (lom_lo + lom_hi)
+
+            # --- phi0 : à partir des pennations mesurées ---
+            pa = data[IDX_PA[m], :]
+            pa = pa[~np.isnan(pa)]
+            pa_min, pa_max = np.min(pa), np.max(pa)
+            phi_lo = pa_min * (1 - MEASURED_MARGIN)
+            phi_hi = pa_max * (1 + MEASURED_MARGIN)
+
+            phi_center = 0.5 * (phi_lo + phi_hi)
+
+            # --- lst : à partir des longueurs de tendon mesurées ---
+            # ATTENTION : le tendon ne peut pas être plus court que lst.
+            # Donc lst_hi <= min(tl) physiologiquement.
+            tl = data[IDX_TL[m], :]
+            tl = tl[~np.isnan(tl)]
+            tl_min, tl_max = np.min(tl), np.max(tl)
+            lst_lo = tl_min * (1 - MEASURED_MARGIN)
+            lst_hi = tl_max * (1 + MEASURED_MARGIN)
+
+            lst_center = 0.5 * (lst_lo + lst_hi)
+
+            # --- Fom : pas mesurable, on garde la valeur scalée ±50% ---
+            fom_center = muscle_tendon_parameters_num[IDX_FOM[m]]
+            fom_lo = fom_center * MARGINS['fom']['low']
+            fom_hi = fom_center * MARGINS['fom']['high']
+
+            initial_guess[IDX_LOM[m]] = lom_center
+            lower_band[IDX_LOM[m]]    = lom_lo
+            upper_band[IDX_LOM[m]]    = lom_hi
+            initial_guess[IDX_PHI[m]] = phi_center
+            lower_band[IDX_PHI[m]]    = phi_lo
+            upper_band[IDX_PHI[m]]    = phi_hi
+            initial_guess[IDX_FOM[m]] = fom_center
+            lower_band[IDX_FOM[m]]    = fom_lo
+            upper_band[IDX_FOM[m]]    = fom_hi
+            initial_guess[IDX_LST[m]] = lst_center
+            lower_band[IDX_LST[m]]    = lst_lo
+            upper_band[IDX_LST[m]]    = lst_hi
+            continue  # passer au muscle suivant
+
+        # ------------------------------------------------------------------
+        # STRATÉGIES literature / scaled / hybrid (logique d'origine)
+        # ------------------------------------------------------------------
+        if strategy == 'literature':
+            lom_center = LITERATURE['lom'][m]
+            phi_center = LITERATURE['phi0'][m]
+            fom_center = muscle_tendon_parameters_num[IDX_FOM[m]]
+            lst_center = LITERATURE['lst'][m]
+        elif strategy in ('scaled', 'hybrid'):
+            lom_center = muscle_tendon_parameters_num[IDX_LOM[m]]
+            phi_center = muscle_tendon_parameters_num[IDX_PHI[m]]
+            fom_center = muscle_tendon_parameters_num[IDX_FOM[m]]
+            lst_center = muscle_tendon_parameters_num[IDX_LST[m]]
+        else:
+            raise ValueError(f"Strategy inconnue : {strategy}")
+
+        # --- lom ---
+        lom_lo = lom_center * MARGINS['lom']['low']
+        lom_hi = lom_center * MARGINS['lom']['high']
+        if strategy == 'hybrid':
+            lom_lo = max(lom_lo, LITERATURE['lom'][m] * 0.60)
+            lom_hi = min(lom_hi, LITERATURE['lom'][m] * 1.40)
+        initial_guess[IDX_LOM[m]] = lom_center
+        lower_band[IDX_LOM[m]]    = lom_lo
+        upper_band[IDX_LOM[m]]    = lom_hi
+
+        # --- phi0 ---
+        phi_lo = phi_center + MARGINS['phi0']['low_rad']
+        phi_hi = phi_center + MARGINS['phi0']['high_rad']
+        phi_lo = max(phi_lo, np.deg2rad(2))
+        phi_hi = min(phi_hi, np.deg2rad(40))
+        initial_guess[IDX_PHI[m]] = phi_center
+        lower_band[IDX_PHI[m]]    = phi_lo
+        upper_band[IDX_PHI[m]]    = phi_hi
+
+        # --- Fom ---
+        fom_lo = fom_center * MARGINS['fom']['low']
+        fom_hi = fom_center * MARGINS['fom']['high']
+        initial_guess[IDX_FOM[m]] = fom_center
+        lower_band[IDX_FOM[m]]    = fom_lo
+        upper_band[IDX_FOM[m]]    = fom_hi
+
+        # --- lst ---
+        lst_lo = lst_center * MARGINS['lst']['low']
+        lst_hi = lst_center * MARGINS['lst']['high']
+        initial_guess[IDX_LST[m]] = lst_center
+        lower_band[IDX_LST[m]]    = lst_lo
+        upper_band[IDX_LST[m]]    = lst_hi
+
+    # === Diagnostic ===
+    if verbose:
+        _print_initial_guess(initial_guess, lower_band, upper_band, muscles,
+                             IDX_LOM, IDX_PHI, IDX_FOM, IDX_LST, strategy)
+        _check_geometric_consistency(data, IDX_FL, IDX_PA, IDX_TL,
+                                     initial_guess, IDX_LOM, IDX_PHI, IDX_LST,
+                                     muscles)
+
+    return initial_guess, upper_band, lower_band
+
+def _print_initial_guess(init, lo, hi, muscles, IDX_LOM, IDX_PHI, IDX_FOM, IDX_LST,strategy):
+    """Affichage formaté de l'initial guess et des bornes."""
+    print("=" * 78)
+    print("Initial guess (stratégie physiologique avec bornes centrées)")
+    print("=" * 78)
+    print(f"{'Param':<14} {'Init':>10} {'Lower':>10} {'Upper':>10} {'Marge L':>9} {'Marge U':>9}")
+    print("-" * 78)
+
+    rows = []
+    for m in muscles:
+        rows.append(('lom_'+m, IDX_LOM[m]))
+    for m in muscles:
+        rows.append(('phi0_'+m, IDX_PHI[m]))
+    for m in muscles:
+        rows.append(('Fom_'+m, IDX_FOM[m]))
+    for m in muscles:
+        rows.append(('lst_'+m, IDX_LST[m]))
+
+    for label, i in rows:
+        margin_lo = (init[i] - lo[i]) / init[i] * 100 if init[i] != 0 else 0
+        margin_hi = (hi[i] - init[i]) / init[i] * 100 if init[i] != 0 else 0
+        print(f"{label:<14} {init[i]:>10.4f} {lo[i]:>10.4f} {hi[i]:>10.4f} "
+              f"{margin_lo:>8.1f}% {margin_hi:>8.1f}%")
+    print("=" * 78)
+
+
+def _check_geometric_consistency(data, IDX_FL, IDX_PA, IDX_TL,
+                                 init, IDX_LOM, IDX_PHI, IDX_LST, muscles):
+    """
+    Vérifie que les mesures (ℓ^M, α, ℓ^T) sont cohérentes avec
+    les valeurs initiales des paramètres et avec une longueur muscle-tendon
+    physiologiquement plausible.
+    """
+    print("\nDiagnostic de cohérence des mesures :")
+    print("-" * 78)
+    warnings = []
+
+    for m in muscles:
+        fl = data[IDX_FL[m], :]
+        pa = data[IDX_PA[m], :]
+        tl = data[IDX_TL[m], :]
+        lmt_reconstructed = fl * np.cos(pa) + tl
+
+        fl_mean, fl_std = np.nanmean(fl), np.nanstd(fl)
+        pa_mean, pa_std = np.nanmean(pa), np.nanstd(pa)
+        tl_mean, tl_std = np.nanmean(tl), np.nanstd(tl)
+        lmt_mean = np.nanmean(lmt_reconstructed)
+        lmt_range = np.nanmax(lmt_reconstructed) - np.nanmin(lmt_reconstructed)
+
+        lom_init = init[IDX_LOM[m]]
+        lst_init = init[IDX_LST[m]]
+        lmt_expected = lom_init * np.cos(init[IDX_PHI[m]]) + lst_init
+
+        print(f"\n  [{m.upper()}]")
+        print(f"    Mesures  : ℓ^M = {fl_mean*100:.2f}±{fl_std*100:.2f} cm   "
+              f"α = {np.rad2deg(pa_mean):.1f}±{np.rad2deg(pa_std):.1f}°   "
+              f"ℓ^T = {tl_mean*100:.2f}±{tl_std*100:.2f} cm")
+        print(f"    ℓ^MT reconstruit (mesures)      : {lmt_mean*100:.2f} cm "
+              f"(amplitude {lmt_range*100:.2f} cm)")
+        print(f"    ℓ^MT attendu (params init)      : {lmt_expected*100:.2f} cm")
+        print(f"    Δ (mesures - params)            : "
+              f"{(lmt_mean - lmt_expected)*100:+.2f} cm")
+
+        # Alertes
+        if abs(lmt_mean - lmt_expected) > 0.02:  # >2 cm de désaccord
+            warnings.append(f"  ⚠ {m.upper()} : ℓ^MT mesuré et ℓ^MT issu des params "
+                          f"diffèrent de {(lmt_mean - lmt_expected)*100:+.1f} cm. "
+                          f"Vérifier le modèle géométrique de longueur muscle-tendon.")
+
+        # Le tendon ne devrait jamais être plus court que lst
+        if np.nanmin(tl) < lst_init * 0.95:
+            warnings.append(f"  ⚠ {m.upper()} : ℓ^T mesuré "
+                          f"({np.nanmin(tl)*100:.1f} cm) < lst_init "
+                          f"({lst_init*100:.1f} cm). Tendon mesuré trop court.")
+
+        # La fiber length devrait osciller autour de lom (plage typique 0.5-1.5 ℓ_0^M)
+        if fl_mean < lom_init * 0.5 or fl_mean > lom_init * 1.5:
+            warnings.append(f"  ⚠ {m.upper()} : ℓ^M moyen "
+                          f"({fl_mean*100:.1f} cm) très éloigné de lom_init "
+                          f"({lom_init*100:.1f} cm).")
+
+    if warnings:
+        print("\nAlertes :")
+        for w in warnings:
+            print(w)
+        print("\n→ Si Δ > 2 cm, l'optimisation NLP risque l'infaisabilité.")
+        print("  Vérifier en priorité le calcul de ℓ^MT(q_knee, q_ankle).")
+    else:
+        print("\n  ✓ Pas d'incohérence majeure détectée.")
+    print("=" * 78)

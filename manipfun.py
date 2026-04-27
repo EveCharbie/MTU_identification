@@ -171,239 +171,235 @@ def import_data_from_excel(full_path):
 
     return data
 
-def add_tendon_length_to_data(data, skeleton_num, casadi_function):
+
+def add_tendon_length_to_data(data, skeleton_num, casadi_function,
+                              q_in_degrees=False):
     """
-    Ajoute les longueurs de tendon aux données en utilisant les fonctions CasADi
+    Compute and fill tendon lengths in `data` using the geometric closure :
+        ℓt = ℓmtu - cos(φ) * ℓm
 
-    Args:
-        data (np.ndarray): Shape (15, ntrials) contenant les données
-        skeleton_num (np.ndarray): Paramètres du squelette OpenSim
-        casadi_function (dict): Dictionnaire contenant les fonctions CasADi
+    Vectorized over trials. Uses casadi_function['get_mtu_length'] mapped
+    across all trials in a single call.
 
-    Returns:
-        data (np.ndarray): Shape (15, ntrials) avec tendon_length calculées
+    Parameters
+    ----------
+    data : np.ndarray, shape (15, n_trials)
+        Data matrix. Modified in place. Rows used as INPUT :
+            [1]    q_knee   (rad by default)
+            [2]    q_ankle  (rad by default)
+            [6:9]  fiber_length (m)
+            [9:12] pennation_angle (rad)
+        Rows OVERWRITTEN :
+            [12:15] tendon_length (m)
+    skeleton_num : np.ndarray
+        Musculoskeletal scalar geometric parameters (size matching the
+        get_mtu_length signature).
+    casadi_function : dict
+        Must contain 'get_mtu_length' as a CasADi Function.
+    q_in_degrees : bool, default False
+        If True, q_knee and q_ankle are interpreted as degrees and converted
+        to radians before computation. If False (assumes SI units), used as is.
+
+    Returns
+    -------
+    data : np.ndarray
+        The same array (modified in place), returned for chaining.
     """
-    from math import cos
+    # Indices des lignes dans data (15, n_trials) — cohérent avec header_data
+    ROW_Q_KNEE = 1
+    ROW_Q_ANKLE = 2
+    ROW_FIBER_LENGTH = slice(6, 9)  # tib_ant, soleus, gast
+    ROW_PENNATION = slice(9, 12)
+    ROW_TENDON_LENGTH = slice(12, 15)
 
-    # Indices dans data
-    idx_q_knee = 1
-    idx_q_ankle = 2
-    idx_fiber_length_ta = 6
-    idx_fiber_length_sol = 7
-    idx_fiber_length_gast = 8
-    idx_pennation_ta = 9
-    idx_pennation_sol = 10
-    idx_pennation_gast = 11
-    idx_tendon_ta = 12
-    idx_tendon_sol = 13
-    idx_tendon_gast = 14
+    n_trials = data.shape[1]
 
-    # Extraire q_knee et q_ankle
-    q_knee = data[idx_q_knee, :]
-    q_ankle = data[idx_q_ankle, :]
+    # --- Extraction et préparation des inputs --- #
+    q_knee = data[ROW_Q_KNEE, :].astype(float)
+    q_ankle = data[ROW_Q_ANKLE, :].astype(float)
+    if q_in_degrees:
+        q_knee = np.deg2rad(q_knee)
+        q_ankle = np.deg2rad(q_ankle)
 
-    # Extraire longueurs de fibres et angles de pennation
-    fiber_length_ta = data[idx_fiber_length_ta, :]
-    fiber_length_sol = data[idx_fiber_length_sol, :]
-    fiber_length_gast = data[idx_fiber_length_gast, :]
+    fiber_length = data[ROW_FIBER_LENGTH, :].astype(float)   # (3, n_trials)
+    pennation = data[ROW_PENNATION, :].astype(float)          # (3, n_trials)
 
-    pennation_ta = data[idx_pennation_ta, :]
-    pennation_sol = data[idx_pennation_sol, :]
-    pennation_gast = data[idx_pennation_gast, :]
+    # --- Construction de l'état musculo-squelettique vectorisé --- #
+    # q de taille (6, n_trials) : q[0:4]=0, q[4]=q_knee, q[5]=q_ankle
+    q_full = np.zeros((6, n_trials))
+    q_full[4, :] = q_knee
+    q_full[5, :] = q_ankle
 
-    ntrials = data.shape[1]
+    # skeleton_num est constant : on le broadcast sur n_trials
+    skeleton_broadcast = np.tile(np.asarray(skeleton_num).reshape(-1, 1),
+                                 (1, n_trials))
+    musculoskeletal_states = np.vstack([q_full, skeleton_broadcast])
 
-    # Initialiser les arrays pour les longueurs de tendon
-    tendon_length_ta = np.zeros(ntrials)
-    tendon_length_sol = np.zeros(ntrials)
-    tendon_length_gast = np.zeros(ntrials)
+    # --- Calcul vectorisé des longueurs MTU via CasADi map --- #
+    # Function.map(N) crée une fonction qui applique la fonction d'origine
+    # à N inputs en parallèle, en une seule évaluation.
+    get_mtu_length_vec = casadi_function['get_mtu_length'].map(n_trials)
+    mtu_length = np.array(get_mtu_length_vec(musculoskeletal_states))  # (3, n_trials)
 
-    # Boucle sur tous les essais
-    for trial in range(ntrials):
-        # Construire le vecteur d'état musculo-squelettique
-        q = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        q[4] = np.deg2rad(q_knee[trial])  # q5
-        q[5] = np.deg2rad(q_ankle[trial])  # q6
+    # --- Calcul des longueurs de tendon (vectorisé) --- #
+    tendon_length = mtu_length - np.cos(pennation) * fiber_length
 
-        pennation_ta_rad = np.deg2rad(pennation_ta[trial])
-        pennation_sol_rad = np.deg2rad(pennation_sol[trial])
-        pennation_gast_rad = np.deg2rad(pennation_gast[trial])
+    # --- Écriture dans data --- #
+    data[ROW_TENDON_LENGTH, :] = tendon_length
 
-        # Concaténer avec les paramètres du squelette
-        musculoskeletal_states_num = np.concatenate((q, skeleton_num))
-
-        # Calculer les longueurs MTU (muscle-tendon unit)
-        mtu_length = casadi_function['get_mtu_length'](musculoskeletal_states_num)
-        mtu_length_ta = float(mtu_length[0])
-        mtu_length_sol = float(mtu_length[1])
-        mtu_length_gast = float(mtu_length[2])
-
-        # Calculer les longueurs de tendon
-        # tendon_length = mtu_length - cos(pennation_angle) * fiber_length
-        tendon_length_ta[trial] = mtu_length_ta - cos(pennation_ta_rad) * fiber_length_ta[trial]
-        tendon_length_sol[trial] = mtu_length_sol - cos(pennation_sol_rad) * fiber_length_sol[trial]
-        tendon_length_gast[trial] = mtu_length_gast - cos(pennation_gast_rad) * fiber_length_gast[trial]
-
-    # Ajouter les longueurs de tendon calculées aux données
-    data[idx_tendon_ta, :] = tendon_length_ta
-    data[idx_tendon_sol, :] = tendon_length_sol
-    data[idx_tendon_gast, :] = tendon_length_gast
-
-    print(f"✓ Tendon lengths calculées et ajoutées")
-    print(f"  Tibialis   : min={np.nanmin(tendon_length_ta):.4f}, max={np.nanmax(tendon_length_ta):.4f}")
-    print(f"  Soleus     : min={np.nanmin(tendon_length_sol):.4f}, max={np.nanmax(tendon_length_sol):.4f}")
-    print(f"  Gastrocnemius : min={np.nanmin(tendon_length_gast):.4f}, max={np.nanmax(tendon_length_gast):.4f}")
+    # --- Rapport console --- #
+    muscle_names = ['Tibialis', 'Soleus', 'Gastrocnemius']
+    print("Tendon lengths computed and added to data:")
+    for i, name in enumerate(muscle_names):
+        print(f"  {name:14s} : "
+              f"min={np.nanmin(tendon_length[i]):.4f}, "
+              f"max={np.nanmax(tendon_length[i]):.4f} m")
 
     return data
 
-def get_initial_guess(muscle_tendon_parameters_num, data):
+
+def get_initial_guess(muscle_tendon_parameters_num, data,
+                       use_measurements=True, verbose=True):
     """
-    Génère initial_guess, lower_band et upper_band à partir des données de test
-    et des paramètres musculo-tendineux.
+    Génère initial_guess, lower_band et upper_band avec une logique
+    physiologiquement cohérente pour chaque type de paramètre.
+
+    Stratégie :
+    - lom (longueur optimale fibre) : moyenne des mesures, bornes ±25%
+    - phi0 (pennation au repos) : valeur à fiber_length proche de lom, bornes ±10°
+    - Fom (force max) : valeur de muscle_tendon_parameters_num, bornes ±50%
+    - lst (slack length tendon) : min des mesures (tendon le moins étiré),
+                                   bornes serrées ±15%
 
     Args:
-        muscle_tendon_parameters_num (np.ndarray): Shape (12,) contenant :
-            [lom_ta, lom_sol, lom_gast,
-             phi0_ta, phi0_sol, phi0_gast,
-             Fom_ta, Fom_sol, Fom_gast,
-             lst_ta, lst_sol, lst_gast]
-
-        data (np.ndarray): Shape (15, ntrials) contenant les données de test
+        muscle_tendon_parameters_num : Shape (12,) - paramètres de référence
+            (typiquement issus d'un modèle scalé type Rajagopal/OpenSim)
+        data : Shape (15, ntrials) - données mesurées
+        use_measurements : si False, utilise uniquement muscle_tendon_parameters_num
+        verbose : affichage des valeurs et warnings
 
     Returns:
-        tuple: (initial_guess, upper_band, lower_band)
-            - initial_guess (np.ndarray): Shape (12,) - valeurs initiales
-            - upper_band (np.ndarray): Shape (12,) - bornes supérieures
-            - lower_band (np.ndarray): Shape (12,) - bornes inférieures
+        initial_guess, upper_band, lower_band
     """
 
-    # Indices des variables dans data
-    # [ankle_torque, q_knee, q_ankle,
-    #  a_tibialis, a_soleus, a_gastrocnemius,
-    #  fiber_length_tibialis, fiber_length_soleus, fiber_length_gastrocnemius,
-    #  pennation_angle_tibialis, pennation_angle_soleus, pennation_angle_gastrocnemius,
-    #  tendon_length_tibialis, tendon_length_soleus, tendon_length_gastrocnemius]
-    range_band = .8 # % de variation
+    # === Indices ===
+    # data
+    IDX_FL = {'ta': 6, 'sol': 7, 'gast': 8}      # fiber length
+    IDX_PA = {'ta': 9, 'sol': 10, 'gast': 11}    # pennation angle
+    IDX_TL = {'ta': 12, 'sol': 13, 'gast': 14}   # tendon length
 
-    idx_fiber_length_ta = 6
-    idx_fiber_length_sol = 7
-    idx_fiber_length_gast = 8
-    idx_pennation_ta = 9
-    idx_pennation_sol = 10
-    idx_pennation_gast = 11
-    idx_tendon_ta = 12
-    idx_tendon_sol = 13
-    idx_tendon_gast = 14
+    # paramètres
+    IDX_LOM = {'ta': 0, 'sol': 1, 'gast': 2}
+    IDX_PHI = {'ta': 3, 'sol': 4, 'gast': 5}
+    IDX_FOM = {'ta': 6, 'sol': 7, 'gast': 8}
+    IDX_LST = {'ta': 9, 'sol': 10, 'gast': 11}
 
-    # Extraire les données pertinentes
-    fiber_length_ta_test = data[idx_fiber_length_ta, :]
-    fiber_length_sol_test = data[idx_fiber_length_sol, :]
-    fiber_length_gast_test = data[idx_fiber_length_gast, :]
-    pennation_ta_test = data[idx_pennation_ta, :]
-    pennation_sol_test = data[idx_pennation_sol, :]
-    pennation_gast_test = data[idx_pennation_gast, :]
-    tendon_ta_test = data[idx_tendon_ta, :]
-    tendon_sol_test = data[idx_tendon_sol, :]
-    tendon_gast_test = data[idx_tendon_gast, :]
+    muscles = ['ta', 'sol', 'gast']
 
-    # Paramètres musculo-tendineux (indices)
-    idx_lom_ta = 0
-    idx_lom_sol = 1
-    idx_lom_gast = 2
-    idx_phi0_ta = 3
-    idx_phi0_sol = 4
-    idx_phi0_gast = 5
-    idx_Fom_ta = 6
-    idx_Fom_sol = 7
-    idx_Fom_gast = 8
-    idx_lst_ta = 9
-    idx_lst_sol = 10
-    idx_lst_gast = 11
+    # === Plages physiologiques de référence (Rajagopal 2015, Arnold 2010) ===
+    # bornes anatomiques absolues (garde-fou)
+    PHYSIO_BOUNDS = {
+        'lom':  {'ta': (0.04, 0.10), 'sol': (0.025, 0.060), 'gast': (0.035, 0.080)},
+        'phi0': {'ta': (0.05, 0.25),  'sol': (0.30, 0.65),   'gast': (0.05, 0.30)},
+        'lst':  {'ta': (0.18, 0.28), 'sol': (0.20, 0.30),   'gast': (0.32, 0.45)},
+    }
 
-    # Initialiser les arrays
     initial_guess = np.zeros(12)
     lower_band = np.zeros(12)
     upper_band = np.zeros(12)
 
-    # Pour chaque paramètre
-    # lom_ta
-    min_val = np.nanmin(fiber_length_ta_test)
-    max_val = np.nanmax(fiber_length_ta_test)
-    lower_band[idx_lom_ta] = min_val - 0.1 * np.abs(min_val)
-    upper_band[idx_lom_ta] = max_val + 0.1 * np.abs(max_val)
-    initial_guess[idx_lom_ta] = (lower_band[idx_lom_ta] + upper_band[idx_lom_ta]) / 2
+    for m in muscles:
+        # --- lom : longueur optimale de fibre ---
+        # Init : moyenne des fiber lengths mesurées (proxy raisonnable de lom
+        # si le mouvement explore une plage autour de la longueur optimale)
+        fl = data[IDX_FL[m], :]
+        fl = fl[~np.isnan(fl)]
+        lom_init = np.nanmean(fl) if use_measurements else muscle_tendon_parameters_num[IDX_LOM[m]]
+        lom_lo = lom_init * 0.75
+        lom_hi = lom_init * 1.25
+        # garde-fou physiologique
+        lom_lo = max(lom_lo, PHYSIO_BOUNDS['lom'][m][0])
+        lom_hi = min(lom_hi, PHYSIO_BOUNDS['lom'][m][1])
+        lom_init = np.clip(lom_init, lom_lo, lom_hi)
 
-    # lom_sol
-    min_val = np.nanmin(fiber_length_sol_test)
-    max_val = np.nanmax(fiber_length_sol_test)
-    lower_band[idx_lom_sol] = min_val - 0.1 * np.abs(min_val)
-    upper_band[idx_lom_sol] = max_val + 0.1 * np.abs(max_val)
-    initial_guess[idx_lom_sol] = (lower_band[idx_lom_sol] + upper_band[idx_lom_sol]) / 2
+        initial_guess[IDX_LOM[m]] = lom_init
+        lower_band[IDX_LOM[m]]   = lom_lo
+        upper_band[IDX_LOM[m]]   = lom_hi
 
-    # lom_gast
-    min_val = np.nanmin(fiber_length_gast_test)
-    max_val = np.nanmax(fiber_length_gast_test)
-    lower_band[idx_lom_gast] = min_val - 0.1 * np.abs(min_val)
-    upper_band[idx_lom_gast] = max_val + 0.1 * np.abs(max_val)
-    initial_guess[idx_lom_gast] = (lower_band[idx_lom_gast] + upper_band[idx_lom_gast]) / 2
+        # --- phi0 : pennation à la longueur optimale ---
+        # On prend la pennation mesurée à fiber_length le plus proche de lom_init
+        pa = data[IDX_PA[m], :]
+        valid = ~(np.isnan(fl) | np.isnan(pa[:len(fl)]))
+        if use_measurements and valid.any():
+            idx_closest = np.argmin(np.abs(data[IDX_FL[m], :] - lom_init))
+            phi_init = data[IDX_PA[m], idx_closest]
+        else:
+            phi_init = muscle_tendon_parameters_num[IDX_PHI[m]]
+        phi_lo = phi_init - np.deg2rad(10)
+        phi_hi = phi_init + np.deg2rad(10)
+        phi_lo = max(phi_lo, PHYSIO_BOUNDS['phi0'][m][0])
+        phi_hi = min(phi_hi, PHYSIO_BOUNDS['phi0'][m][1])
+        phi_init = np.clip(phi_init, phi_lo, phi_hi)
 
-    # phi0_ta
-    min_val = np.nanmin(pennation_ta_test)
-    max_val = np.nanmax(pennation_ta_test)
-    lower_band[idx_phi0_ta] = min_val - 0.1 * np.abs(min_val)
-    upper_band[idx_phi0_ta] = max_val + 0.1 * np.abs(max_val)
-    initial_guess[idx_phi0_ta] = (lower_band[idx_phi0_ta] + upper_band[idx_phi0_ta]) / 2
+        initial_guess[IDX_PHI[m]] = phi_init
+        lower_band[IDX_PHI[m]]   = phi_lo
+        upper_band[IDX_PHI[m]]   = phi_hi
 
-    # phi0_sol
-    min_val = np.nanmin(pennation_sol_test)
-    max_val = np.nanmax(pennation_sol_test)
-    lower_band[idx_phi0_sol] = min_val - 0.1 * np.abs(min_val)
-    upper_band[idx_phi0_sol] = max_val + 0.1 * np.abs(max_val)
-    initial_guess[idx_phi0_sol] = (lower_band[idx_phi0_sol] + upper_band[idx_phi0_sol]) / 2
+        # --- Fom : force isométrique max ---
+        # Pas mesurable directement, on garde la valeur scalée
+        fom_init = muscle_tendon_parameters_num[IDX_FOM[m]]
+        initial_guess[IDX_FOM[m]] = fom_init
+        lower_band[IDX_FOM[m]]   = fom_init * 0.5
+        upper_band[IDX_FOM[m]]   = fom_init * 1.5
 
-    # phi0_gast
-    min_val = np.nanmin(pennation_gast_test)
-    max_val = np.nanmax(pennation_gast_test)
-    lower_band[idx_phi0_gast] = min_val - 0.1 * np.abs(min_val)
-    upper_band[idx_phi0_gast] = max_val + 0.1 * np.abs(max_val)
-    initial_guess[idx_phi0_gast] = (lower_band[idx_phi0_gast] + upper_band[idx_phi0_gast]) / 2
+        # --- lst : slack length tendon ---
+        # Init = min des longueurs de tendon mesurées (tendon le moins étiré)
+        # PAS la moyenne ! Le tendon n'est jamais plus court que lst.
+        tl = data[IDX_TL[m], :]
+        tl = tl[~np.isnan(tl)]
+        if use_measurements and len(tl) > 0:
+            lst_init = np.nanmin(tl) * 0.98  # léger margin sous le min mesuré
+        else:
+            lst_init = muscle_tendon_parameters_num[IDX_LST[m]]
+        lst_lo = lst_init * 0.85
+        lst_hi = lst_init * 1.15
+        # garde-fou physiologique
+        lst_lo = max(lst_lo, PHYSIO_BOUNDS['lst'][m][0])
+        lst_hi = min(lst_hi, PHYSIO_BOUNDS['lst'][m][1])
+        # cohérence : lst_init doit rester < min(tl) sinon contrainte tendue dès le repos
+        if use_measurements and len(tl) > 0:
+            lst_hi = min(lst_hi, np.nanmin(tl))
+        lst_init = np.clip(lst_init, lst_lo, lst_hi)
 
-    # Fom : conserver directement les valeurs de muscle_tendon_parameters_num
-    initial_guess[idx_Fom_ta] = muscle_tendon_parameters_num[idx_Fom_ta]
-    lower_band[idx_Fom_ta] = muscle_tendon_parameters_num[idx_Fom_ta] * (1-range_band)
-    upper_band[idx_Fom_ta] = muscle_tendon_parameters_num[idx_Fom_ta] * (1+range_band)
+        initial_guess[IDX_LST[m]] = lst_init
+        lower_band[IDX_LST[m]]   = lst_lo
+        upper_band[IDX_LST[m]]   = lst_hi
 
-    initial_guess[idx_Fom_sol] = muscle_tendon_parameters_num[idx_Fom_sol]
-    lower_band[idx_Fom_sol] = muscle_tendon_parameters_num[idx_Fom_sol] * (1-range_band)
-    upper_band[idx_Fom_sol] = muscle_tendon_parameters_num[idx_Fom_sol] * (1+range_band)
+    # === Vérifications ===
+    if verbose:
+        print("=" * 70)
+        print("Initial guess généré (avec garde-fous physiologiques)")
+        print("=" * 70)
+        labels = [f"{p}_{m}" for p in ['lom', 'phi0', 'Fom', 'lst'] for m in muscles]
+        for i, lab in enumerate(labels):
+            print(f"  {lab:12s} : init={initial_guess[i]:.4f}  "
+                  f"[{lower_band[i]:.4f}, {upper_band[i]:.4f}]")
 
-    initial_guess[idx_Fom_gast] = muscle_tendon_parameters_num[idx_Fom_gast]
-    lower_band[idx_Fom_gast] = muscle_tendon_parameters_num[idx_Fom_gast] * (1-range_band)
-    upper_band[idx_Fom_gast] = muscle_tendon_parameters_num[idx_Fom_gast] * (1+range_band)
-
-    # lst : à partir des données de test
-    min_val = np.nanmin(tendon_ta_test)
-    max_val = np.nanmax(tendon_ta_test)
-    lower_band[idx_lst_ta] = min_val - 0.1 * np.abs(min_val)
-    upper_band[idx_lst_ta] = max_val + 0.1 * np.abs(max_val)
-    initial_guess[idx_lst_ta] = (lower_band[idx_lst_ta] + upper_band[idx_lst_ta]) / 2
-
-    min_val = np.nanmin(tendon_sol_test)
-    max_val = np.nanmax(tendon_sol_test)
-    lower_band[idx_lst_sol] = min_val - 0.1 * np.abs(min_val)
-    upper_band[idx_lst_sol] = max_val + 0.1 * np.abs(max_val)
-    initial_guess[idx_lst_sol] = (lower_band[idx_lst_sol] + upper_band[idx_lst_sol]) / 2
-
-    min_val = np.nanmin(tendon_gast_test)
-    max_val = np.nanmax(tendon_gast_test)
-    lower_band[idx_lst_gast] = min_val - 0.1 * np.abs(min_val)
-    upper_band[idx_lst_gast] = max_val + 0.1 * np.abs(max_val)
-    initial_guess[idx_lst_gast] = (lower_band[idx_lst_gast] + upper_band[idx_lst_gast]) / 2
-
-    print(f"✓ Initial guess generé")
-    print(f"  Shape : {initial_guess.shape}")
+        # check sanity vs littérature
+        warnings = []
+        for m in muscles:
+            if not (PHYSIO_BOUNDS['lom'][m][0] <= initial_guess[IDX_LOM[m]] <= PHYSIO_BOUNDS['lom'][m][1]):
+                warnings.append(f"⚠ lom_{m} hors plage physiologique")
+            if not (PHYSIO_BOUNDS['lst'][m][0] <= initial_guess[IDX_LST[m]] <= PHYSIO_BOUNDS['lst'][m][1]):
+                warnings.append(f"⚠ lst_{m} hors plage physiologique")
+        if warnings:
+            print("\nAlertes :")
+            for w in warnings:
+                print(f"  {w}")
+        print("=" * 70)
 
     return initial_guess, upper_band, lower_band
+
 
 def plot_data(data, muscle_names=None, trial_indices=None, save_path=None):
     """
