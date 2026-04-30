@@ -289,17 +289,15 @@ hypothetical_data = useful.load_data_from_xlsx(folders["sim_data"], 'dataset_hyp
 
 # 5.2.2 add tendon length to data set and import test data set
 hypothetical_data = manipfun.add_tendon_length_to_data(hypothetical_data,skeleton_num, casadi_function)
-"""
+
 # 5.2.3 plot datas (verif)
 manipfun.plot_data(hypothetical_data, muscle_names=['tibialis', 'soleus', 'gastrocnemius'])
 
 
 #  5.3 set the initial guess according to the test data
-initial_guess, upper_band, lower_band = useful.get_initial_guess(muscle_tendon_parameters_num, hypothetical_data,
-                                 strategy='scaled')
-
+initial_guess, upper_band, lower_band = manipfun.get_initial_guess(muscle_tendon_parameters_num, hypothetical_data)
+"""
 #  5.4 optimisation problem with perfect initial gess
-
 useful.nlp_verification(hypothetical_data,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
 
 
@@ -316,16 +314,15 @@ stats = useful.compare_datasets(
     hypothetical_data, hypothetical_data_opt, header,
     label_a='original', label_b='opti'
 )
-
+"""
 
 #  5.6 optimisation problem with initial gess according to our methods
-initial_guess, upper_band, lower_band = useful.get_initial_guess(muscle_tendon_parameters_num, hypothetical_data,
-                                 strategy='measured')
+initial_guess, upper_band, lower_band = manipfun.get_initial_guess(muscle_tendon_parameters_num, hypothetical_data)
 
 muscle_tendon_parameters_opt_x0_rand = useful.optimization_nlp(hypothetical_data,initial_guess,lower_band,upper_band,
                                                                skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
 
-
+"""
 
 #  5.7 generate data with the optimized parameter
 header, hypothetical_data_opt, path_csv = useful.generate_estimated_data(hypothetical_data, skeleton_num, muscle_tendon_parameters_opt_x0_rand,
@@ -339,7 +336,6 @@ stats = useful.compare_datasets(
     hypothetical_data, hypothetical_data_opt, header,
     label_a='original', label_b='opti'
 )
-
 """
 
 """
@@ -355,8 +351,8 @@ hypothetical_data_noise = useful.add_noise(
 )
 
 muscle_tendon_parameters_opt_bruit = useful.optimization_nlp(hypothetical_data_noise,muscle_tendon_parameters_num,lower_band,upper_band,skeleton_num,muscle_tendon_parameters_num,unknown_parameters,casadi_function)
-"""
-"""
+
+
 from monte_carlo_identification import main as run_mc
 
 results = run_mc(
@@ -371,8 +367,9 @@ results = run_mc(
     optimization_nlp=useful.optimization_nlp,
     cfg={"n_mc": 50},  # ou {"n_mc": 30} pour commencer plus vite
 )
+
 """
-"""
+
 from run_identifiability import main as run_identifiability
 
 setup = dict(data=hypothetical_data,
@@ -390,7 +387,7 @@ results = run_identifiability(
     setup
 )
 
-
+"""
 """
 #############################################################################
 #    6. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)
