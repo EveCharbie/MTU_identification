@@ -1,9 +1,8 @@
 import os
-import numpy as np
-import pandas as pd
 import import_functions
 import manipfun
 import useful
+import matplotlib.pyplot as plt
 
 #############################################################################
 #     1. Organized path and files in a dictionary
@@ -25,7 +24,7 @@ folders = {
 #############################################################################
 #     2. neuro-musculo-skeletal: generic model
 #############################################################################
-"""
+
         # 2.1 neuro-musculo-skeletal (ℓom, φo, Fom, ℓst)
 # 2.1.1 Import from Opensim Musculoskeletal Geometry and Generic Muscle Tendon Parameters
 mtu_params=['l0m', 'phi0', 'f0m', 'lst']
@@ -39,7 +38,7 @@ skeleton_num, muscle_tendon_parameters_num = import_functions.get_model_osim_gen
 #       - fiber contraction velocity (νmt = 1)
 #       - and electromechanical delay (a(t) = e(t))
 casadi_function, unknown_parameters, definition = useful.get_model_equation()
-
+"""
 # 2.1.4 Test the model
 # skeletal state (q)
 q1 = 0 # x coord pelvis
@@ -63,6 +62,22 @@ a_num = [0.2, # activation tibialis
 
 # test
 useful.test_model(skeleton_num,muscle_tendon_parameters_num,casadi_function,a_num,q_num)
+"""
+fig, axes = useful.plot_force_length_activation_3d(
+    a=[0.3, 0.7, 0.5],
+    fiber_length=[0.10, 0.08, 0.12],
+    tendon_length=[0.21, 0.18, 0.25],
+    muscle_tendon_parameters=muscle_tendon_parameters_num,           # vecteur de 12
+    get_fiber_force_from_fiber_length=casadi_function["get_fiber_force_from_fiber_length"],
+    get_tendon_force_from_tendon_length=casadi_function["get_tendon_force_from_tendon_length"],
+    muscle_idx=1,
+    muscle_names=["Soleus", "Gastroc Med", "Gastroc Lat"],
+    normalize=True,
+)
+plt.show()
+"""
+plt.savefig("force_length_activation_3d.pdf", dpi=300, bbox_inches="tight")
+plt.show()
 
 # 2.1.5 interactive model test
 useful.interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_function)
@@ -369,7 +384,7 @@ results = run_mc(
 )
 
 """
-
+"""
 from run_identifiability import main as run_identifiability
 
 setup = dict(data=hypothetical_data,
@@ -387,7 +402,7 @@ results = run_identifiability(
     setup
 )
 
-"""
+
 """
 #############################################################################
 #    6. NLP  NonLinear Programming optimisation problem (ℓom, φo, Fom, ℓst)

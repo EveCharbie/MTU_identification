@@ -38,7 +38,6 @@ def get_skeleton():
     # ========= useful functions  ========= #
     def rototranslation_rz(translation, theta):
         # Build 4x4 homogeneous transformation matrix for rotation about Z and translation
-        from casadi import cos, sin
         tx, ty, tz = translation[0], translation[1], translation[2]
         trans_matrix = SX.zeros(4, 4)
         trans_matrix[0, 0] = cos(theta)
@@ -200,15 +199,18 @@ def get_fiber_passive_force_length(normalized_fiber_length, k_fiber, maximal_iso
     # === Passive Force-Length (S3) ===
     e0 = 0.6
 
-    normalized_fiber_passive_force_part_1 = 0
-    normalized_fiber_passive_force_part_2 = (exp(((k_fiber * (
+    normalized_fiber_passive_force_exp = (exp(((k_fiber * (
             normalized_fiber_length - 1)) / e0)) - 1) / (exp(k_fiber) - 1)
 
-    normalized_fiber_passive_force = if_else(normalized_fiber_length < 1,
-                                             normalized_fiber_passive_force_part_1,
-                                             normalized_fiber_passive_force_part_2)  # if normalized length under 0 the force = 0 %Normalized equation
+    # non-negative forces
+    normalized_fiber_passive_force = if_else(
+        normalized_fiber_passive_force_exp > 0,
+        normalized_fiber_passive_force_exp,
+        0
+    )
 
     fiber_passive_force = normalized_fiber_passive_force * maximal_isometric_force  # Non - normalized equation
+
     return fiber_passive_force
 
 def get_tendon_force_length(normalized_tendon_length, k_tendon, maximal_isometric_force):
@@ -217,15 +219,18 @@ def get_tendon_force_length(normalized_tendon_length, k_tendon, maximal_isometri
     c2 = 0.995
     c3 = 0.250  # tendon parameters
 
-    normalized_tendon_force_part_1 = 0
-    normalized_tendon_force_part_2 = c1 * exp(
-        k_tendon * (normalized_tendon_length - c2)) - c3  # Normalized equation
 
-    normalized_tendon_force = if_else(normalized_tendon_length < 1,
-                                      normalized_tendon_force_part_1,
-                                      normalized_tendon_force_part_2)  # if normalized length under 0 the force = 0   # Normalized equation
+    normalized_tendon_force_curve = c1 * exp(k_tendon * (normalized_tendon_length - c2)) - c3
+
+    # non-negative forces
+    normalized_tendon_force = if_else(
+        normalized_tendon_force_curve > 0,
+        normalized_tendon_force_curve,
+        0
+    )
 
     tendon_force = normalized_tendon_force * maximal_isometric_force  # Non-normalized equation
+
     return tendon_force
 
 def get_muscle_total_force(fiber_active_force_length, normalized_fiber_force_velocity, fiber_passive_force):
@@ -440,16 +445,8 @@ def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
     joint_torque = moment_arm * tendon_force
     joint_torque = sum1(joint_torque[:, -1:])
 
-    get_joint_moment = Function(
-        'get_joint_moment',
-        [all_states, muscle_tendon_parameters],
-        [joint_torque],
-        ['all_states', 'muscle_tendon_parameters'],
-        ['joint_torque']
-    )
-
     get_tendon_force_from_tendon_length = Function(
-        'get_tendon_force',
+        'get_tendon_force_from_tendon_length',
         [tendon_length, muscle_tendon_parameters],
         [tendon_force],
         ['tendon_length', 'muscle_tendon_parameters'],
@@ -457,7 +454,7 @@ def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
     )
 
     get_fiber_force_from_fiber_length = Function(
-        'estimateFiberForce',
+        'get_fiber_force_from_fiber_length',
         [a, fiber_length, muscle_tendon_parameters],
         [fiber_force],
         ['muscle_activation', 'fiber_length', 'muscle_tendon_parameters'],
@@ -481,6 +478,9 @@ def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
 
     # ========= 7. Assemblage du retour ========= #
     return {
+        # Fonctions representation
+        'get_tendon_force_from_tendon_length': get_tendon_force_from_tendon_length,
+        'get_fiber_force_from_fiber_length': get_fiber_force_from_fiber_length,
         # Fonctions de force
         'get_tendon_force': get_tendon_force_fn,
         'get_fiber_force': get_fiber_force_fn,
@@ -822,7 +822,7 @@ def x_start_equi(a, lmtu, parameters, rng=None):
     l0m = parameters[0]; phi0 = parameters[1]; lst = parameters[3]
 
     tendon_length = lst * (1.0 + a * 0.05)
-    pennation_angle = phi0 * (1.0 + rng.uniform(-0.2, 0.2))
+    pennation_angle = phi0 * (phi0 * rng.uniform(-0.9, 2)) # rand [0.01 0.8] deg
     fiber_length = (lmtu - tendon_length) / np.cos(pennation_angle)
 
     x_start = np.array([fiber_length, pennation_angle, tendon_length])
@@ -862,80 +862,240 @@ def get_named_params(parameters, param_labels, required):
         raise KeyError(f"Missing parameters: {missing}. "
                        f"Available: {list(params.keys())}")
     return tuple(params[k] for k in required)
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
-def plot_force_length(a, fiber_length, param, casadi_function):
-    # parameter
-    l0m = param[0]
-    phi0 = param[1]
-    f0m = param[2]
-    lst = param[3]
 
-    passive_force_ = float(casadi_function['representationMusclePassiveForce'](fiber_length, l0m, f0m))
-    active_force_ = float(casadi_function['representationMuscleActiveForceLength'](a, fiber_length, l0m, f0m))
-    total_force_ = passive_force_ + active_force_
+def plot_force_length_activation_3d(
+    a,
+    fiber_length,
+    tendon_length,
+    muscle_tendon_parameters,
+    get_fiber_force_from_fiber_length,
+    get_tendon_force_from_tendon_length,
+    muscle_idx: int = 1,
+    muscle_names: list = None,
+    n_grid: int = 50,
+    normalize: bool = True,
+    elev: int = 15,
+    azim: int = -180,
+    cmap: str = "cividis",
+):
+    """
+    Représentation 3D force-longueur-activation pour un muscle d'un système
+    musculo-tendineux multi-muscles (vecteurs CasADi de taille 3).
 
-    fiber_length_range = np.linspace(0.5 * l0m, 1.5 * l0m, 50)
-    a_range = np.linspace(0.0, 1.0, 50)
+    Convention des paramètres (12) :
+        [l0m_1, l0m_2, l0m_3,
+         phi0_1, phi0_2, phi0_3,
+         f0m_1, f0m_2, f0m_3,
+         lst_1, lst_2, lst_3]
 
-    A, L = np.meshgrid(a_range, fiber_length_range)
+    Convention des indices muscles : 1, 2, 3 (1-indexé).
+    """
+    # ---------- coercition en arrays numpy ----------
+    a = np.asarray(a, dtype=float).flatten()
+    fiber_length = np.asarray(fiber_length, dtype=float).flatten()
+    tendon_length = np.asarray(tendon_length, dtype=float).flatten()
+    params = np.asarray(muscle_tendon_parameters, dtype=float).flatten()
 
-    # Evaluate over the grid
-    passive_force = np.zeros_like(L)
-    active_force = np.zeros_like(L)
-    total_force = np.zeros_like(L)
+    n_muscles = 3
+    assert a.size == n_muscles
+    assert fiber_length.size == n_muscles
+    assert tendon_length.size == n_muscles
+    assert params.size == 12
+    assert muscle_idx in (1, 2, 3), "muscle_idx doit être 1, 2 ou 3"
 
-    for i in range(L.shape[0]):
-        for j in range(L.shape[1]):
-            l = L[i, j]
-            act = A[i, j]
+    if muscle_names is None:
+        muscle_names = [f"Muscle {i}" for i in (1, 2, 3)]
+
+    # ---------- extraction des paramètres du muscle d'intérêt ----------
+    # Paramètres rangés par type : [l0m×3, phi0×3, f0m×3, lst×3]
+    p_offset = muscle_idx - 1
+    l0m = float(params[p_offset + 0])
+    f0m = float(params[p_offset + 6])
+    lst = float(params[p_offset + 9])
+
+    # index 0-based pour accéder aux vecteurs d'état (a, fiber_length, tendon_length)
+    m = muscle_idx - 1
+
+    # ---------- helpers d'évaluation des fonctions CasADi vectorielles ----------
+    def eval_fiber_force(a_scalar, l_scalar):
+        a_vec = a.copy()
+        l_vec = fiber_length.copy()
+        a_vec[m] = a_scalar
+        l_vec[m] = l_scalar
+        out = np.array(
+            get_fiber_force_from_fiber_length(a_vec, l_vec, params)
+        ).flatten()
+        return float(out[m])
+
+    def eval_tendon_force(lt_scalar):
+        lt_vec = tendon_length.copy()
+        lt_vec[m] = lt_scalar
+        out = np.array(
+            get_tendon_force_from_tendon_length(lt_vec, params)
+        ).flatten()
+        return float(out[m])
+
+    # ---------- grille muscle ----------
+    fl_range = np.linspace(0.5 * l0m, 1.5 * l0m, n_grid)
+    a_range = np.linspace(0.0, 1.0, n_grid)
+    A_grid, L_grid = np.meshgrid(a_range, fl_range)
+
+    passive_force = np.zeros_like(L_grid)
+    active_force = np.zeros_like(L_grid)
+    total_force = np.zeros_like(L_grid)
+
+    for i in range(L_grid.shape[0]):
+        for j in range(L_grid.shape[1]):
+            l = L_grid[i, j]
+            act = A_grid[i, j]
             try:
-                passive_force[i, j] = float(casadi_function['representationMusclePassiveForce'](l, l0m, f0m))
-                active_force[i, j] = float(casadi_function['representationMuscleActiveForceLength'](act, l, l0m, f0m))
-                total_force[i, j] = passive_force[i, j] + active_force[i, j]
+                f_pass = eval_fiber_force(0.0, l)
+                f_tot = eval_fiber_force(act, l)
+                passive_force[i, j] = f_pass
+                total_force[i, j] = f_tot
+                active_force[i, j] = f_tot - f_pass
             except Exception as e:
-                print(f"Error at i={i}, j={j}, l={l}, a={a}: {e}")
+                print(f"[fiber] erreur i={i}, j={j}, l={l}, a={act}: {e}")
                 passive_force[i, j] = np.nan
                 active_force[i, j] = np.nan
                 total_force[i, j] = np.nan
 
-    # Plotting all three force surfaces
-    fig = plt.figure(figsize=(18, 5))
+    # ---------- point de fonctionnement courant ----------
+    a_pt = a[m]
+    fl_pt_raw = fiber_length[m]
+    f_pass_pt = eval_fiber_force(0.0, fl_pt_raw)
+    f_tot_pt = eval_fiber_force(a_pt, fl_pt_raw)
+    f_act_pt = f_tot_pt - f_pass_pt
 
-    # Passive Force
-    ax1 = fig.add_subplot(1, 3, 1, projection='3d')
-    ax1.plot_surface(A, L, passive_force, cmap='plasma')
-    ax1.plot(a, fiber_length, passive_force_, color='k', marker='*', markersize=5, markeredgecolor='k',
-             markeredgewidth=20)
-    ax1.set_title('Passive Muscle Force')
-    ax1.set_xlabel('Activation (a)')
-    ax1.set_ylabel('Fiber Length (m)')
-    ax1.set_zlabel('Passive Force (N)')
-    ax1.view_init(elev=10, azim=200)
+    # ---------- courbe tendon ----------
+    lt_range = np.linspace(0.97 * lst, 1.04 * lst, n_grid * 4)
+    tendon_curve = np.array([eval_tendon_force(lt) for lt in lt_range])
+    lt_pt_raw = tendon_length[m]
+    f_tendon_pt = eval_tendon_force(lt_pt_raw)
 
-    # Active Force
-    ax2 = fig.add_subplot(1, 3, 2, projection='3d')
-    ax2.plot_surface(A, L, active_force, cmap='plasma')
-    ax2.plot(a, fiber_length, active_force_, color='k', marker='*', markersize=5, markeredgecolor='k',
-             markeredgewidth=20)
-    ax2.set_title('Active Muscle Force')
-    ax2.set_xlabel('Activation (a)')
-    ax2.set_ylabel('Fiber Length (m)')
-    ax2.set_zlabel('Active Force (N)')
-    ax2.view_init(elev=10, azim=200)
+    # ---------- normalisation ----------
+    if normalize:
+        L_plot = L_grid / l0m
+        fl_pt = fl_pt_raw / l0m
+        passive_plot = passive_force / f0m
+        active_plot = active_force / f0m
+        total_plot = total_force / f0m
+        f_pass_pt_plot = f_pass_pt / f0m
+        f_act_pt_plot = f_act_pt / f0m
+        f_tot_pt_plot = f_tot_pt / f0m
 
-    # Total Force
-    ax3 = fig.add_subplot(1, 3, 3, projection='3d')
-    ax3.plot_surface(A, L, total_force, cmap='plasma')
-    ax3.plot(a, fiber_length, total_force_, color='k', marker='*', markersize=5, markeredgecolor='k',
-             markeredgewidth=20)
-    ax3.set_title('Total Muscle Force')
-    ax3.set_xlabel('Activation (a)')
-    ax3.set_ylabel('Fiber Length (m)')
-    ax3.set_zlabel('Total Force (N)')
-    ax3.view_init(elev=10, azim=200)
+        lt_plot = lt_range / lst
+        lt_pt_plot = lt_pt_raw / lst
+        tendon_curve_plot = tendon_curve / f0m
+        f_tendon_pt_plot = f_tendon_pt / f0m
+
+        ylabel_l = r"$\tilde{l}_f = l_f / l_0^m$"
+        zlabel_F = r"$\tilde{F} = F / F_0^m$"
+        xlabel_lt = r"$\tilde{l}_t = l_t / l_{st}$"
+    else:
+        L_plot = L_grid
+        fl_pt = fl_pt_raw
+        passive_plot, active_plot, total_plot = passive_force, active_force, total_force
+        f_pass_pt_plot, f_act_pt_plot, f_tot_pt_plot = f_pass_pt, f_act_pt, f_tot_pt
+
+        lt_plot = lt_range
+        lt_pt_plot = lt_pt_raw
+        tendon_curve_plot = tendon_curve
+        f_tendon_pt_plot = f_tendon_pt
+
+        ylabel_l = "Longueur de fibre (m)"
+        zlabel_F = "Force (N)"
+        xlabel_lt = "Longueur de tendon (m)"
+
+    # ---------- figure ----------
+    fig = plt.figure(figsize=(20, 5.2))
+    fig.suptitle(
+        f"Force – longueur – activation : {muscle_names[m]}",
+        fontsize=13, fontweight="bold", y=1.02,
+    )
+
+    titles = ["Force passive", "Force active", "Force totale (passive + active)"]
+    surfaces = [passive_plot, active_plot, total_plot]
+    points_z = [f_pass_pt_plot, f_act_pt_plot, f_tot_pt_plot]
+    axes_3d = []
+
+    for k, (title, F_grid, z_pt) in enumerate(zip(titles, surfaces, points_z)):
+        ax = fig.add_subplot(1, 4, k + 1, projection="3d")
+        surf = ax.plot_surface(
+            A_grid, L_plot, F_grid,
+            cmap=cmap, edgecolor="none", alpha=0.92, antialiased=True,
+        )
+        ax.scatter(
+            [a_pt], [fl_pt], [z_pt],
+            color="k", s=80, marker="*", depthshade=False,
+            edgecolor="white", linewidth=0.8, zorder=10,
+        )
+        zmin = np.nanmin(F_grid)
+        ax.plot([a_pt, a_pt], [fl_pt, fl_pt], [zmin, z_pt],
+                color="k", lw=0.6, ls=":")
+
+        ax.set_title(title, fontsize=11, pad=8)
+        ax.set_xlabel("Activation $a$", fontsize=9, labelpad=4)
+        ax.set_ylabel(ylabel_l, fontsize=9, labelpad=4)
+        ax.set_zlabel(zlabel_F, fontsize=9, labelpad=4)
+        ax.tick_params(labelsize=8)
+        ax.view_init(elev=elev, azim=azim)
+        ax.invert_yaxis()
+        fig.colorbar(surf, ax=ax, shrink=0.55, aspect=14, pad=0.08)
+        axes_3d.append(ax)
+
+    # ---------- panneau tendon ----------
+    ax_t = fig.add_subplot(1, 4, 4)
+    ax_t.fill_between(lt_plot, 0, tendon_curve_plot, color="#BA7517", alpha=0.15)
+    ax_t.plot(lt_plot, tendon_curve_plot, color="#BA7517", lw=2.4, label="Force tendon")
+    ax_t.scatter([lt_pt_plot], [f_tendon_pt_plot], color="k", marker="*",
+                 s=110, zorder=5, label="Point courant")
+    ax_t.set_title("Force tendon", fontsize=11, pad=8)
+    ax_t.set_xlabel(xlabel_lt, fontsize=10)
+    ax_t.set_ylabel(zlabel_F, fontsize=10)
+    ax_t.tick_params(labelsize=9)
+    ax_t.grid(True, alpha=0.3, lw=0.6)
+    ax_t.spines[["top", "right"]].set_visible(False)
+    ax_t.legend(fontsize=8.5, frameon=False, loc="upper left")
 
     plt.tight_layout()
-    plt.show()
+    return fig, (*axes_3d, ax_t)
+
+
+def plot_all_muscles_3d(
+    a,
+    fiber_length,
+    tendon_length,
+    muscle_tendon_parameters,
+    get_fiber_force_from_fiber_length,
+    get_tendon_force_from_tendon_length,
+    muscle_names: list = None,
+    **kwargs,
+):
+    """Boucle sur les 3 muscles (indices 1, 2, 3)."""
+    if muscle_names is None:
+        muscle_names = [f"Muscle {i}" for i in (1, 2, 3)]
+
+    figures = []
+    for idx in (1, 2, 3):
+        fig, _ = plot_force_length_activation_3d(
+            a=a,
+            fiber_length=fiber_length,
+            tendon_length=tendon_length,
+            muscle_tendon_parameters=muscle_tendon_parameters,
+            get_fiber_force_from_fiber_length=get_fiber_force_from_fiber_length,
+            get_tendon_force_from_tendon_length=get_tendon_force_from_tendon_length,
+            muscle_idx=idx,
+            muscle_names=muscle_names,
+            **kwargs,
+        )
+        figures.append(fig)
+    return figures
+
 
 def plotmodel(ax, muscle_origins, muscle_insertions, joint_centers, via_point):
     ax.clear()
