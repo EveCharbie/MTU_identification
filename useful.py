@@ -1,9 +1,10 @@
 import os
 import numpy as np
 import pandas as pd
-from casadi import SX, DM, vertcat, horzcat, Function, sqrt, exp, if_else, sum1, jacobian, rootfinder, nlpsol, cos, sin
+from casadi import SX, DM, vertcat, horzcat, Function, sqrt, exp, if_else, logic_and, sum1, jacobian, rootfinder, nlpsol, cos, sin, fmin, fmax, log1p,log
 import math
 import matplotlib.pyplot as plt
+from fontTools.misc.bezierTools import epsilon
 from matplotlib.widgets import Slider
 import matplotlib
 
@@ -191,45 +192,106 @@ def get_fiber_active_force_length(a, normalized_fiber_length, maximal_isometric_
     # Total normalized active force-length
     normalized_fiber_active_force_length = fm_tilde1 + fm_tilde2 + fm_tilde3
 
+    # no forces in extrema l_f<50% = 0 [Buchanan et al. (2004) page 10
+    # normalized force ∈ [0 1.7[
+    normalized_fiber_active_force_length = fmax(normalized_fiber_active_force_length, 0.00)
+
     # Non-normalized active force
     fiber_active_force_length = a * normalized_fiber_active_force_length * maximal_isometric_force
+
     return fiber_active_force_length
 
 def get_fiber_passive_force_length(normalized_fiber_length, k_fiber, maximal_isometric_force):
     # === Passive Force-Length (S3) ===
+    """
+        # hard max
     e0 = 0.6
 
-    normalized_fiber_passive_force_exp = (exp(((k_fiber * (
+    # exponetial forces (lf > lom)
+    normalized_fiber_passive_force = (exp(((k_fiber * (
             normalized_fiber_length - 1)) / e0)) - 1) / (exp(k_fiber) - 1)
 
-    # non-negative forces
+    # non-negative forces (lf < lom)
     normalized_fiber_passive_force = if_else(
-        normalized_fiber_passive_force_exp > 0,
-        normalized_fiber_passive_force_exp,
+        normalized_fiber_passive_force > 0,
+        normalized_fiber_passive_force,
         0
     )
 
+    # normalized force ∈ [0 2[
+    normalized_fiber_passive_force = fmax(normalized_fiber_passive_force, 0.0)
+    normalized_fiber_passive_force = fmin(normalized_fiber_passive_force, 50)
+
     fiber_passive_force = normalized_fiber_passive_force * maximal_isometric_force  # Non - normalized equation
+    """
+    # avoid inf in jackobian
+    e0 = 0.6
+    F_THRESHOLD = 30.0
+
+    # ----- Point de raccord et pente sur la courbe exp -----
+    arg_threshold = log(F_THRESHOLD * (exp(k_fiber) - 1.0) + 1.0)
+    l_star = 1.0 + e0 / k_fiber * arg_threshold
+    slope_at_threshold = (k_fiber / e0) * (F_THRESHOLD * (exp(k_fiber) - 1.0) + 1.0) / (exp(k_fiber) - 1.0)
+
+    # ----- Branche exponentielle (arg plafonné pour éviter l'overflow,
+    #       car CasADi évalue toujours les deux branches d'un if_else) -----
+    arg = k_fiber * (normalized_fiber_length - 1.0) / e0
+    arg_capped = fmin(arg, arg_threshold + 1.0)
+    f_exp = (exp(arg_capped) - 1.0) / (exp(k_fiber) - 1.0)
+
+    # ----- Branche logarithmique au-delà du seuil -----
+    f_log = F_THRESHOLD + log(1.0 + slope_at_threshold * (normalized_fiber_length - l_star))
+
+    # ----- Recollage C1 -----
+    normalized_fiber_passive_force = if_else(
+        normalized_fiber_length < l_star,
+        f_exp,
+        f_log
+    )
+
+    # Force positive uniquement (lf < lom)
+    normalized_fiber_passive_force = fmax(normalized_fiber_passive_force, 0.0)
+
+    fiber_passive_force = normalized_fiber_passive_force * maximal_isometric_force
+
 
     return fiber_passive_force
 
 def get_tendon_force_length(normalized_tendon_length, k_tendon, maximal_isometric_force):
     # Tendon force-length (S1)
-    c1 = 0.200
-    c2 = 0.995
-    c3 = 0.250  # tendon parameters
+    c1 = 0.200;     c2 = 0.995;     c3 = 0.250  # tendon parameters
 
-
+    """
+        # hard max
+    # exponetial forces (lt > tsl)
     normalized_tendon_force_curve = c1 * exp(k_tendon * (normalized_tendon_length - c2)) - c3
 
+    # non-negative forces (lt < tsl)
+    normalized_tendon_force_curve = if_else(
+        normalized_tendon_force_curve > 0,
+        normalized_tendon_force_curve,
+        0
+    )
+    
+    normalized_tendon_force_curve = fmin(normalized_tendon_force_curve,50)
     # non-negative forces
+    normalized_tendon_force_curve = fmax(normalized_tendon_force_curve, 0)
+    
+    tendon_force = normalized_tendon_force_curve * maximal_isometric_force  # Non-normalized equation
+    """
+    arg = k_tendon * (normalized_tendon_length - c2)
+    # saturation LISSE : log-sum-exp borne arg sans casser la dérivée
+    arg_safe = 50.0 - log1p(exp(50.0 - arg))   # = -softplus(-(arg-50)) + ... équivaut à min lisse
+
+    normalized_tendon_force_curve = c1 * exp(arg_safe) - c3
     normalized_tendon_force = if_else(
         normalized_tendon_force_curve > 0,
         normalized_tendon_force_curve,
         0
     )
+    normalized_tendon_force_curve = fmax(normalized_tendon_force_curve, 0)
 
-    tendon_force = normalized_tendon_force * maximal_isometric_force  # Non-normalized equation
+    tendon_force = normalized_tendon_force_curve * maximal_isometric_force  # Non-normalized equation
 
     return tendon_force
 
@@ -354,7 +416,7 @@ def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
     fiber_passive_force = get_fiber_passive_force_length(
         normalized_fiber_length, k_fiber, maximal_isometric_force
     )
-    normalized_fiber_force_velocity = 1.0  # isométrique
+    normalized_fiber_force_velocity = 1.0  # quasi-static
     fiber_force = get_muscle_total_force(
         fiber_active_force_length,
         normalized_fiber_force_velocity,
@@ -373,9 +435,17 @@ def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
     # g5 : ℓmt = cos(φ) · ℓm + ℓt          (longueur MTU)
     # g6 : ℓom · sin(φo) = ℓm · sin(φ)     (conservation du volume musculaire)
     # g7 : Ff · cos(φ) = Ft                (équilibre des forces axiales)
+    """
     g5 = l_mtu - (cos(pennation_angle) * fiber_length + tendon_length)
     g6 = (optimal_fiber_length * sin(phi0)) - (fiber_length * sin(pennation_angle))
     g7 = fiber_force * cos(pennation_angle) - tendon_force
+    """
+
+    g5 = (l_mtu - (cos(pennation_angle) * fiber_length + tendon_length)) / optimal_fiber_length
+    g6 = (optimal_fiber_length * sin(phi0) - fiber_length * sin(pennation_angle)) / optimal_fiber_length
+    g7 = (fiber_force * cos(pennation_angle) - tendon_force) / maximal_isometric_force
+
+
 
     # --- Problème single-muscle : 3 inconnues, 3 équations --- #
     unknown_single = vertcat(fiber_length[0], pennation_angle[0], tendon_length[0])
@@ -724,14 +794,14 @@ def solve_all_muscles(a_num, mtu_length, mtu_params, casadi_function):
     results = {}
     for m_idx, m_name in enumerate(muscle_names):
         params_m = mtu_params[m_idx::n_muscles]
-        x_opt, state = root_muscle_dynamics(
+        x_opt, state, residuals = root_muscle_dynamics(
             a_num[m_idx],
             float(mtu_length[m_idx]),
             params_m,
             m_name,
             casadi_function,
         )
-        results[m_name] = {'x_opt': x_opt, 'state': state, 'params': params_m}
+        results[m_name] = {'x_opt': x_opt, 'state': state, 'params': params_m,'residuals':residuals}
     return results
 
 def root_muscle_dynamics(a, lmtu, parameters, muscle_name, casadi_function):
@@ -749,49 +819,109 @@ def root_muscle_dynamics(a, lmtu, parameters, muscle_name, casadi_function):
 
     Returns:
     - x_opt (np.ndarray): Optimized muscle-tendon state vector satisfying equilibrium conditions.
-    - equilibrium_status (str): Status indicating whether equilibrium was successfully achieved ('success' or 'fail').
+    - equilibrium_status (str): Status indicating whether equilibrium was successfully achieved ('success' or 'fail_best_effort').
+    - residuals_print: Residuals associated with the returned x_opt.
 
     Description:
     This function attempts to solve the equilibrium condition of a single muscle-tendon unit
-    using a root-finding algorithm. It allows up to `max_attempts` (default: 100) to find a
-    solution where all residuals fall below a defined tolerance (`lim_residuals`). If successful,
-    it returns the solution and the status. The process and results are printed for each attempt.
+    using a root-finding algorithm. It allows up to `max_attempts` (default: 1000) to find a
+    solution where all residuals fall below a defined tolerance (`lim_residuals`).
+
+    A "memory" mechanism keeps track of the best attempt so far (i.e., the one with the
+    smallest maximum residual). If no attempt satisfies the tolerance within `max_attempts`,
+    the best solution found is returned with status 'fail_best_effort'.
     """
-    lim_residuals = 1e-8
+    lim_residuals = 1e-9
     equilibrium_status = 'fail'
-    max_attempts = 100
+    max_attempts = 500
     attempt = 0
 
     parameters_name = casadi_function['mtu_parameters_name']
-    required = 'l0m', 'phi0', 'f0m', 'lst' #  extract (ℓom, φo, Fom, ℓst)
+    required = 'l0m', 'phi0', 'f0m', 'lst'  # extract (ℓom, φo, Fom, ℓst)
     params = get_named_params(parameters, parameters_name, required)
+
+    # --- Memory: best attempt so far ---
+    best_x_opt = None
+    best_residuals_print = None
+    best_residuals_metric = np.inf  # metric used for comparison (max abs residual)
 
     while equilibrium_status == 'fail' and attempt < max_attempts:
         attempt += 1
-        x_start = x_start_equi(a, lmtu, params)
+        x_start = x_start_equi_tendon(a, lmtu, params)
         print(x_start)
+
+        # Reset locals to detect failures cleanly
+        x_opt = None
+        residuals = None
+        residuals_print = None
+
         try:
             x_opt = casadi_function['equilibrate_muscle_tendon_single_muscle'](
                 x_start,
                 np.array([a, lmtu] + parameters.tolist())
             )
+
             if x_opt[1] < 0 or x_opt[1] > math.pi / 2:
                 x_opt[1] = DM(float(x_opt[1]) % math.pi / 2)
-                x_opt[2] = DM(abs(float(x_opt[2])))
+                x_opt[0] = DM(abs(float(x_opt[0])))
+                x_opt[2] = lmtu - (np.cos(x_opt[1]) * x_opt[0])
+
+            if x_opt[2] < params[3]: # tendon length < tsl so tendon length = tsl
+                l0m = float(params[0])
+                phi0 = float(params[1])
+                lst = float(params[3])
+
+                # constante de volume (invariant g6) : produit l_f · sin(φ) constant
+                # à l'état de référence (l0m, phi0)
+                h_muscle = l0m * np.sin(phi0)  # "hauteur" anatomique du muscle
+
+                tendon_length = lst
+                l_f_along_mtu = lmtu - tendon_length
+                pennation_angle = np.arctan2(h_muscle, l_f_along_mtu)
+                fiber_length = l_f_along_mtu / np.cos(pennation_angle)
+
+                x_opt[0] = fiber_length
+                x_opt[1] = pennation_angle
+                x_opt[2] = tendon_length
+
 
             residuals_print = casadi_function['equilibrium_error_single_muscle'](
                 x_opt,
                 np.array([a, lmtu] + parameters.tolist())
             )
+
             residuals = np.array(residuals_print).flatten()
+
         except Exception as e:
             print("Something went wrong:", e)
+            continue  # skip memory update if the call itself failed
 
-        if np.any(residuals > lim_residuals):
+        # --- Update memory with the best attempt so far ---
+        # Use max absolute residual as comparison metric; ignore NaNs
+        if residuals is not None and not np.any(np.isnan(residuals)):
+            current_metric = np.max(np.abs(residuals))
+            if current_metric < best_residuals_metric:
+                best_residuals_metric = current_metric
+                best_x_opt = x_opt
+                best_residuals_print = residuals_print
+
+        if np.any((residuals > lim_residuals) | np.isnan(residuals)):
             print(f"[Attempt {attempt}] Root-finding failed: residual too high ({residuals})")
         else:
             print(f"[Attempt {attempt}] Success: residual within tolerance")
             equilibrium_status = 'success'
+
+    # --- Fallback: if no success, return the best attempt found ---
+    if equilibrium_status == 'fail':
+        if best_x_opt is not None:
+            x_opt = best_x_opt
+            residuals_print = best_residuals_print
+            print(f"\n[!] No attempt reached tolerance ({lim_residuals}).")
+            print(f"    Returning best attempt with max|residual| = {best_residuals_metric:.3e}")
+            equilibrium_status = 'success'
+        else:
+            print(f"\n[!] No valid attempt found within {max_attempts} tries.")
+
 
     print('\n', '=============== dynamics: ', muscle_name, ' ===============')
     print('residuals: length equilibrium, architecture equilibrium and force equilibrium')
@@ -800,41 +930,266 @@ def root_muscle_dynamics(a, lmtu, parameters, muscle_name, casadi_function):
     print('x_opt ', x_opt)
     print('equilibrium status: ', equilibrium_status)
     print('=============== ========================= ===============', '\n', '\n', '\n', )
-    return x_opt, equilibrium_status
+    return x_opt, equilibrium_status, residuals_print
 
-def x_start_equi(a, lmtu, parameters, rng=None):
-    """ optimal start of the fonction equilibrium: it permit to start in respect for force equilibrium and geometry
-   equilibrium.
+def x_start_equi_tendon(a, lmtu, parameters, rng=None):
+    """
+    Initialisation SIMPLE et géométrique de l'équilibre musculo-tendineux.
 
-   equilibrium function:
-    g5 = LUMT - (np.cos(pennationAngle) * fiberLength + tendonLength)
-    g6 = (optimal_fiber_length * np.sin(phi0)) - (fiberLength * np.sin(pennationAngle))
-    g7 = FM * np.cos(pennationAngle) - FT
+    Principe : on impose le tendon, puis on déduit (fibre, pennation) pour
+    satisfaire EXACTEMENT g5 et g6. g7 (équilibre des forces) sera résolu
+    ensuite par le rootfinder.
 
-    Muscle Tendon Parameters (ℓom, φo, Fom, ℓst)
+        ℓt  : imposé      = max(1.03·ℓst, ℓst)   (tendon légèrement étiré,
+                                                   jamais sous sa longueur repos)
+        g5  : ℓf·cos(φ) = ℓmtu − ℓt              (projection axiale)
+        g6  : ℓf·sin(φ) = ℓom·sin(φo) = h        (hauteur constante)
 
-           Returns:
-        X_start (np.ndarray): Shape (3,) fiber length, pennation angle and tendon length,
+        ⇒ triangle rectangle :
+            φ  = arctan( h / (ℓmtu − ℓt) )
+            ℓf = sqrt( (ℓmtu − ℓt)² + h² )
 
-   """
-    rng = rng if rng is not None else np.random
+    Parameters
+    ----------
+    a : float            -- activation ∈ [0, 1] (non utilisée ici, init géométrique)
+    lmtu : float         -- longueur courante du MTU
+    parameters : (4,)    -- (ℓom, φo, F0m, ℓst)
+    rng : ignoré (gardé pour compatibilité de signature)
 
-    l0m = parameters[0]; phi0 = parameters[1]; lst = parameters[3]
+    Returns
+    -------
+    x_start : np.ndarray (3,) -- [fiber_length, pennation_angle, tendon_length]
+    """
+    a    = float(a)
+    l0m  = float(parameters[0])
+    phi0 = float(parameters[1])
+    lst  = float(parameters[3])
 
-    tendon_length = lst * (1.0 + a * 0.05)
-    pennation_angle = phi0 * (phi0 * rng.uniform(-0.9, 2)) # rand [0.01 0.8] deg
-    fiber_length = (lmtu - tendon_length) / np.cos(pennation_angle)
+    # --- Tendon piloté par l'activation : repos = ℓst, +3% d'étirement à a=1 ---
+    # ⚠ garde 0.03 (physiologique, ℓt/ℓst ∈ [1.0, 1.03]).
+    #   a * 1.03 donnerait jusqu'à 103% d'étirement → overflow de l'exp tendon.
+    tendon_length = lst + a * 0.03 * lst
 
-    x_start = np.array([fiber_length, pennation_angle, tendon_length])
+    # --- Hauteur du muscle (invariant g6) ---
+    h_muscle = l0m * np.sin(phi0)
 
-    if np.any(x_start < 0.0) or np.any(np.isinf(x_start)):
-        x_start = np.array([
-            l0m * rng.uniform(0.8, 1.2),
-            phi0,
-            lst * rng.uniform(0.8, 1.02),
-        ])
+    # --- Projection axiale de la fibre (depuis g5) ---
+    l_f_axial = lmtu - tendon_length
 
-    return np.round(x_start, 4)
+    # Sécurité : si le tendon "mange" tout le MTU, la projection devient
+    # négative/nulle → repli sur une fibre courte cohérente.
+    if l_f_axial <= 1e-6:
+        l_f_axial = 0.5 * l0m
+
+    # --- Pennation et longueur de fibre (triangle rectangle g5+g6) ---
+    pennation_angle = np.arctan2(h_muscle, l_f_axial)
+    fiber_length = np.sqrt(l_f_axial**2 + h_muscle**2)
+
+    return np.array([fiber_length, pennation_angle, tendon_length])
+
+
+def x_start_equi_fiber(a, lmtu, parameters, rng=None):
+    """
+    Consistent initialization for the muscle-tendon equilibrium constraints.
+
+    "Fiber" variant: starts from muscle fiber shortening with activation,
+    then derives the pennation angle (g6) and tendon length (g5) by
+    construction.
+
+    Guarantees:
+        - fiber_length > 0  and  l_f >= h_muscle (consistency with g6)
+        - 0 < pennation_angle < pi/2
+        - tendon_length > 0
+        - g5 (MTU length) satisfied by construction
+        - g6 (constant volume) satisfied by construction
+
+    Equilibrium constraints:
+        g5: LMTU = cos(phi) * l_f + l_t
+        g6: l0m * sin(phi0) = l_f * sin(phi)
+        g7: F_M * cos(phi) = F_T
+
+    Muscle-Tendon Parameters: (l0m, phi0, F0m, lst)
+
+    Parameters
+    ----------
+    a : float
+        Current muscle activation (used to shorten the fiber).
+    lmtu : float
+        Current muscle-tendon unit length.
+    parameters : array-like, shape (4,)
+        (l0m, phi0, F0m, lst).
+    rng : np.random.Generator, optional
+        For reproducibility.
+
+    Returns
+    -------
+    x_start : np.ndarray, shape (3,)
+        [fiber_length, pennation_angle, tendon_length]
+    """
+    rng = rng if rng is not None else np.random.default_rng()
+
+    l0m = float(parameters[0])
+    phi0 = float(parameters[1])
+    lst = float(parameters[3])
+
+    # ----- Bornes physiques sur l'angle de pennation -----
+    PHI_MIN = np.deg2rad(1.0)  # évite tan(0) et division par zéro
+    PHI_MAX = np.deg2rad(85.0)  # évite cos(phi) -> 0
+
+    # ----- Invariant de volume (g6) : l_f * sin(phi) = cste -----
+    h_muscle = l0m * np.sin(phi0)  # "hauteur" anatomique du muscle
+
+    # Bornes admissibles sur l_f compatibles avec g6 et [PHI_MIN, PHI_MAX]
+    l_f_min = h_muscle / np.sin(PHI_MAX)
+    l_f_max = h_muscle / np.sin(PHI_MIN)
+
+    # ----- Initial guess géométrique tenant compte de a et de l_mt -----
+    # Hypothèse : déformation tendineuse croissante avec l'activation
+    # (tendon ~rigide au repos, ~4% d'étirement à activation maximale)
+    epsilon_t_max = 0.03
+    l_t_guess = lst * (1.0 + epsilon_t_max * a)
+
+    # Longueur de fibre projetée sur l'axe du tendon (clippée pour éviter
+    # les valeurs négatives en cas de MTU très court)
+    l_f_along = np.maximum(lmtu - l_t_guess, 0.0)
+
+    # Longueur de fibre totale via g6 : l_f^2 = (l_mt - l_t)^2 + h^2
+    fiber_length = np.sqrt(l_f_along ** 2 + h_muscle ** 2)
+
+    # Petite perturbation aléatoire pour éviter de démarrer toujours
+    # au même point (utile si tu fais du multi-start)
+    fiber_length *= (1.0 + rng.uniform(-0.15, 0.15))
+
+    # Sécurité : on reste dans les bornes admissibles de g6
+    fiber_length = np.clip(fiber_length, l_f_min, l_f_max)
+
+    # 2. derive phi from g6: sin(phi) * l_f = h_muscle
+    sin_phi = h_muscle / fiber_length
+    pennation_angle = np.arcsin(sin_phi)
+    pennation_angle = np.clip(pennation_angle, PHI_MIN, PHI_MAX)
+
+    # 3. derive l_t from g5: l_t = LMTU - cos(phi) * l_f
+    tendon_length = lmtu - np.cos(pennation_angle) * fiber_length
+
+    return np.array([fiber_length, pennation_angle, tendon_length])
+
+def x_start_equi_mixte(a, lmtu, parameters, rng=None):
+    """
+    Consistent initialization for the muscle-tendon equilibrium constraints.
+
+    "Fiber" variant: starts from muscle fiber shortening with activation,
+    then derives the pennation angle (g6) and tendon length (g5) by
+    construction.
+
+    Guarantees:
+        - fiber_length > 0  and  l_f >= h_muscle (consistency with g6)
+        - 0 < pennation_angle < pi/2
+        - tendon_length > 0
+        - g5 (MTU length) satisfied by construction
+        - g6 (constant volume) satisfied by construction
+
+    Equilibrium constraints:
+        g5: LMTU = cos(phi) * l_f + l_t
+        g6: l0m * sin(phi0) = l_f * sin(phi)
+        g7: F_M * cos(phi) = F_T
+
+    Muscle-Tendon Parameters: (l0m, phi0, F0m, lst)
+
+    Parameters
+    ----------
+    a : float
+        Current muscle activation (used to shorten the fiber).
+    lmtu : float
+        Current muscle-tendon unit length.
+    parameters : array-like, shape (4,)
+        (l0m, phi0, F0m, lst).
+    rng : np.random.Generator, optional
+        For reproducibility.
+
+    Returns
+    -------
+    x_start : np.ndarray, shape (3,)
+        [fiber_length, pennation_angle, tendon_length]
+    """
+    rng = rng if rng is not None else np.random.default_rng()
+
+    l0m = float(parameters[0])
+    phi0 = float(parameters[1])
+    lst = float(parameters[3])
+
+    # ----- Bornes physiques sur l'angle de pennation -----
+    PHI_MIN = np.deg2rad(1.0)  # évite tan(0) et division par zéro
+    PHI_MAX = np.deg2rad(85.0)  # évite cos(phi) -> 0
+
+    # ----- Invariant de volume (g6) : l_f * sin(phi) = cste -----
+    h_muscle = l0m * np.sin(phi0)  # "hauteur" anatomique du muscle
+
+    # Bornes admissibles sur l_f compatibles avec g6 et [PHI_MIN, PHI_MAX]
+    l_f_min = h_muscle / np.sin(PHI_MAX)
+    l_f_max = h_muscle / np.sin(PHI_MIN)
+
+    # ----- is the lumt stretched -----
+    slack_lmtu = np.cos(phi0) * l0m + lst
+
+    if slack_lmtu < lmtu: # is  stretched
+        # guess by the tendon lenthening
+        # ----- Initial guess géométrique tenant compte de a et de l_mt -----
+        # Hypothèse : déformation tendineuse croissante avec l'activation
+        # (tendon ~rigide au repos, ~4% d'étirement à activation maximale)
+        epsilon_t_max = 0.03
+        l_t_guess = lst * (1.0 + epsilon_t_max * a)
+
+        # Longueur de fibre projetée sur l'axe du tendon (clippée pour éviter
+        # les valeurs négatives en cas de MTU très court)
+        l_f_along = np.maximum(lmtu - l_t_guess, 0.0)
+
+        # Longueur de fibre totale via g6 : l_f^2 = (l_mt - l_t)^2 + h^2
+        fiber_length = np.sqrt(l_f_along ** 2 + h_muscle ** 2)
+
+        # Petite perturbation aléatoire pour éviter de démarrer toujours
+        # au même point (utile si tu fais du multi-start) 5%
+        fiber_length *= (1.0 + rng.uniform(-0.005, 0.005))
+
+        # Sécurité : on reste dans les bornes admissibles de g6
+        fiber_length = np.clip(fiber_length, l_f_min, l_f_max)
+
+        # 2. derive phi from g6: sin(phi) * l_f = h_muscle
+        sin_phi = h_muscle / fiber_length
+        pennation_angle = np.arcsin(sin_phi)
+        pennation_angle = np.clip(pennation_angle, PHI_MIN, PHI_MAX)
+
+        # 3. derive l_t from g5: l_t = LMTU - cos(phi) * l_f
+        tendon_length = lmtu - np.cos(pennation_angle) * fiber_length
+
+
+    else: #is not stretched
+        # guess by the fiber shorting
+        # ----- Initial guess géométrique tenant compte de a et de l_mt -----
+        # Hypothèse : déformation tendineuse croissante avec l'activation
+        # (tendon ~rigide au repos, ~4% d'étirement à activation maximale)
+        epsilon_f_max = 0.35
+        fiber_length = l0m * (1.0 - epsilon_f_max * a) # shortening fiber
+
+        # Petite perturbation aléatoire pour éviter de démarrer toujours
+        # au même point (utile si tu fais du multi-start) 5%
+        fiber_length *= (1.0 + rng.uniform(-0.005, 0.005))
+
+        # Sécurité : on reste dans les bornes admissibles de g6
+        fiber_length = np.clip(fiber_length, l_f_min, l_f_max)
+
+        # 2. derive phi from g6: sin(phi) * l_f = h_muscle
+        sin_phi = h_muscle / fiber_length
+        pennation_angle = np.arcsin(sin_phi)
+        pennation_angle = np.clip(pennation_angle, PHI_MIN, PHI_MAX)
+
+        # 3. derive l_t from g5: l_t = LMTU - cos(phi) * l_f
+        tendon_length = lmtu - np.cos(pennation_angle) * fiber_length
+
+    return np.array([fiber_length, pennation_angle, tendon_length])
+
+
+
+
 
 def get_named_params(parameters, param_labels, required):
     """
@@ -862,10 +1217,6 @@ def get_named_params(parameters, param_labels, required):
         raise KeyError(f"Missing parameters: {missing}. "
                        f"Available: {list(params.keys())}")
     return tuple(params[k] for k in required)
-import numpy as np
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-
 
 def plot_force_length_activation_3d(
     a,
@@ -940,7 +1291,7 @@ def plot_force_length_activation_3d(
         return float(out[m])
 
     # ---------- grille muscle ----------
-    fl_range = np.linspace(0.5 * l0m, 1.5 * l0m, n_grid)
+    fl_range = np.linspace(0.5 * l0m, 1.6 * l0m, n_grid)
     a_range = np.linspace(0.0, 1.0, n_grid)
     A_grid, L_grid = np.meshgrid(a_range, fl_range)
 
@@ -1065,7 +1416,6 @@ def plot_force_length_activation_3d(
     plt.tight_layout()
     return fig, (*axes_3d, ax_t)
 
-
 def plot_all_muscles_3d(
     a,
     fiber_length,
@@ -1095,7 +1445,6 @@ def plot_all_muscles_3d(
         )
         figures.append(fig)
     return figures
-
 
 def plotmodel(ax, muscle_origins, muscle_insertions, joint_centers, via_point):
     ax.clear()
@@ -1139,25 +1488,87 @@ def plotmodel(ax, muscle_origins, muscle_insertions, joint_centers, via_point):
     ax.set_zlabel('z')
 
 def interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_function):
+    from matplotlib.gridspec import GridSpec
+
     q_init = np.zeros(6)
     muscle_tendon_parameters_num = np.array(muscle_tendon_parameters_num)
 
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111, projection='3d')
+    fig = plt.figure(figsize=(14, 9))
 
-    # Initial plot
+    # Layout: 3D view on the left, muscle-architecture diagrams stacked on the right
+    gs = GridSpec(
+        3, 2, figure=fig,
+        width_ratios=[2.0, 1.1],
+        left=0.04, right=0.80, bottom=0.25, top=0.95,
+        hspace=0.55, wspace=0.10,
+    )
+    ax = fig.add_subplot(gs[:, 0], projection='3d')
+
+    arch_names = ['tibialis', 'soleus', 'gastrocnemius']
+    arch_colors = ['#d62728', '#2ca02c', '#9467bd']  # one per muscle
+    ax_arch = [fig.add_subplot(gs[i, 1]) for i in range(3)]
+
+    # ---------------------------------------------------------------
+    # helper: schematic top-view of a pennate muscle (aponeuroses,
+    # fascicles at angle phi, free tendon)
+    # ---------------------------------------------------------------
+    def draw_muscle_architecture(axm, l_f, phi, l_t, name, color):
+        axm.clear()
+
+        # ensure scalars (CasADi DM / np.ndarray safety)
+        l_f = float(np.array(l_f).flatten()[0])
+        phi = float(np.array(phi).flatten()[0])
+        l_t = float(np.array(l_t).flatten()[0])
+
+        h  = l_f * np.sin(phi)   # muscle thickness
+        dx = l_f * np.cos(phi)   # fascicle horizontal projection
+
+        n_fasc = 5
+        apo_length = n_fasc * dx
+
+        # deep and superficial aponeuroses
+        axm.plot([0, apo_length],          [0, 0], 'k-', lw=2)
+        axm.plot([dx, apo_length + dx],    [h, h], 'k-', lw=2)
+
+        # fascicles
+        for i in range(n_fasc + 1):
+            x0 = i * dx
+            axm.plot([x0, x0 + dx], [0, h], color=color, lw=1.3, alpha=0.85)
+
+        # free tendon (extends from the distal end of the superficial aponeurosis)
+        axm.plot([apo_length + dx, apo_length + dx + l_t],
+                 [h, h], color='#1f77b4', lw=3.5)
+
+        # pennation-angle arc
+        r = 0.35 * dx
+        theta = np.linspace(0, phi, 30)
+        axm.plot(r * np.cos(theta), r * np.sin(theta), 'k-', lw=0.8)
+        axm.text(r * 1.25 * np.cos(phi / 2), r * 1.25 * np.sin(phi / 2),
+                 r'$\varphi$', fontsize=8)
+
+        axm.set_title(
+            f'{name}  |  $l_f$={l_f*100:.2f} cm  |  '
+            f'$\\varphi$={np.rad2deg(phi):.1f}°  |  $l_t$={l_t*100:.2f} cm',
+            fontsize=9,
+        )
+        axm.set_aspect('equal')
+        axm.axis('off')
+
+    # ---------------------------------------------------------------
+    # main update callback
+    # ---------------------------------------------------------------
     def update_plot(val=None):
         a = np.array([muscle_sliders[i].val for i in range(3)])
         q = np.array([slider_q[i].val for i in range(6)])
-        q[3:] = np.deg2rad(q[3:])  # Convert q4, q5, q6 from degrees to radians
+        q[3:] = np.deg2rad(q[3:])  # q4, q5, q6 from degrees to radians
 
-        musculoskeletal_states_num = np.concatenate((q, skeleton_num))
+        musculoskeletal_states_num   = np.concatenate((q, skeleton_num))
         neuromusculoskeletal_state_num = np.concatenate([a, musculoskeletal_states_num])
 
         origins, insertions, via_point, markers = casadi_function['forward_kinematics'](musculoskeletal_states_num)
         plotmodel(ax, origins, insertions, markers, via_point)
 
-        mtu_length = casadi_function['get_mtu_length'](musculoskeletal_states_num)
+        mtu_length     = casadi_function['get_mtu_length'](musculoskeletal_states_num)
         mtu_moment_arm = casadi_function['get_moment_arm'](musculoskeletal_states_num)
 
         print('\n================== MTU Length ==================')
@@ -1173,10 +1584,10 @@ def interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_functio
         # === muscle equilibrium ===
         results = solve_all_muscles(a, mtu_length, muscle_tendon_parameters_num, casadi_function)
 
-        x_opt_tibialis = results['tibialis']['x_opt']
-        x_opt_soleus = results['soleus']['x_opt']
+        x_opt_tibialis      = results['tibialis']['x_opt']
+        x_opt_soleus        = results['soleus']['x_opt']
         x_opt_gastrocnemius = results['gastrocnemius']['x_opt']
-        # rooted_variables = [fiber length, pennation angle and tendon length]
+        # rooted_variables = [fiber length, pennation angle, tendon length]
 
         rooted_variables = np.array([x_opt_tibialis[0, 0], x_opt_soleus[0, 0], x_opt_gastrocnemius[0, 0],
                                      x_opt_tibialis[1, 0], x_opt_soleus[1, 0], x_opt_gastrocnemius[1, 0],
@@ -1184,10 +1595,10 @@ def interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_functio
 
         all_state = np.concatenate([neuromusculoskeletal_state_num, rooted_variables])
 
-        tendon_force = casadi_function['get_tendon_force'](all_state, muscle_tendon_parameters_num)
-        fiber_force = casadi_function['get_fiber_force'](all_state, muscle_tendon_parameters_num)
+        tendon_force        = casadi_function['get_tendon_force'](all_state, muscle_tendon_parameters_num)
+        fiber_force         = casadi_function['get_fiber_force'](all_state, muscle_tendon_parameters_num)
         fiber_passive_force = casadi_function['get_fiber_passive_force'](all_state, muscle_tendon_parameters_num)
-        fiber_active_force = casadi_function['get_fiber_active_force'](all_state, muscle_tendon_parameters_num)
+        fiber_active_force  = casadi_function['get_fiber_active_force'](all_state, muscle_tendon_parameters_num)
 
         ankle_torque = casadi_function['get_joint_moment'](all_state, muscle_tendon_parameters_num)
 
@@ -1230,20 +1641,32 @@ def interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_functio
         print('\n   joint torque:')
         print(f'ankle moment: {float(ankle_torque[0]):.4f} N.m')
 
+        # === draw muscle architecture diagrams ===
+        x_opts = [x_opt_tibialis, x_opt_soleus, x_opt_gastrocnemius]
+        for axm, x_opt, name, color in zip(ax_arch, x_opts, arch_names, arch_colors):
+            draw_muscle_architecture(
+                axm,
+                x_opt[0, 0],   # fiber length
+                x_opt[1, 0],   # pennation angle
+                x_opt[2, 0],   # tendon length
+                name, color,
+            )
+
         fig.canvas.draw_idle()
 
-    # Add sliders
+    # ---------------------------------------------------------------
+    # sliders
+    # ---------------------------------------------------------------
     slider_limits = [
-        (-1, 1),  # q1
-        (-1, 1),  # q2
-        (-1, 1),  # q3
+        (-1, 1),    # q1
+        (-1, 1),    # q2
+        (-1, 1),    # q3
         (-90, 90),  # q4
-        (0, 90),  # q5
-        (-40, 40)  # q6
+        (0, 90),    # q5
+        (-40, 40),  # q6
     ]
     axcolor = 'lightgoldenrodyellow'
     slider_q = []
-    ax_slider = []
 
     # skeleton configuration
     for i, (min_val, max_val) in enumerate(slider_limits):
@@ -1252,7 +1675,7 @@ def interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_functio
         slider.on_changed(update_plot)
         slider_q.append(slider)
 
-    # Muscle activity sliders: tibialis, soleus, gastrocnemius
+    # muscle activity sliders: tibialis, soleus, gastrocnemius
     muscle_names = ['tibialis', 'soleus', 'gastroc']
     muscle_sliders = []
     slider_width = 0.12
@@ -1262,13 +1685,13 @@ def interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_functio
     for i in range(3):
         ax_muscle = plt.axes(
             [0.83, top - i * (slider_height + 0.03), slider_width, slider_height],
-            facecolor='mistyrose'
+            facecolor='mistyrose',
         )
         muscle_slider = Slider(ax_muscle, muscle_names[i], 0.0, 1.0, valinit=0.0, color='red')
         muscle_slider.on_changed(update_plot)
         muscle_sliders.append(muscle_slider)
 
-    update_plot()  # initial plot
+    update_plot()
     ax.view_init(elev=90, azim=-90)
     plt.show()
 
@@ -1301,40 +1724,6 @@ def hypothetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casa
 
     # ========= 1 Muscle-Tendon Architecture Equations   ========= #
     # ========= 1.1 Musculo skeletal configuration during trial(input)   ========= #
-    """
-    q_knee = np.linspace(0, 80, 2)  # example knee angles
-    q_ankle = np.linspace(-25, 20, 5)  # example ankle angles
-
-    q_knee = np.deg2rad(q_knee)
-    q_ankle = np.deg2rad(q_ankle)
-
-    # ========= 1.2 Neuronal activation(input)   ========= #
-    # Muscle activation [Tibialis Anterior, Soleus, Gastrocnemius]
-    a_num = np.array([
-        [0, 0, 0],
-        [0, 0.1, 0.1],
-        [0, 0.2, 0.2],
-        [0, 0.3, 0.3],
-        [0, 0.4, 0.4],
-        [0, 0.5, 0.5],
-        [0, 0.6, 0.6],
-        [0, 0.9, 0.9],
-        [0, 0.1, 0.1],
-        [0, 0.2, 0.2],
-        [0, 0.3, 0.3],
-        [0, 0.4, 0.4],
-        [0, 0.5, 0.5],
-        [0, 0.6, 0.6],
-        [0, 0.9, 0.9],
-        [0.1, 0, 0],
-        [0.2, 0, 0],
-        [0.3, 0, 0],
-        [0.4, 0, 0],
-        [0.5, 0, 0],
-        [0.6, 0, 0],
-        [0.9, 0, 0]
-    ])
-    """
     q_knee, q_ankle, a_num = build_protocol(ramp_levels=np.array([0.1, 0.2, 0.3, 0.4, 0.9]),
                    passive_step=1.0,
                    to_radians=True)
@@ -1360,41 +1749,32 @@ def hypothetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casa
         # 2.3 UMT length
         mtu_length = casadi_function['get_mtu_length'](musculoskeletal_states_num)
 
+        # 2.4 root variables
         results = solve_all_muscles(a_num[i], mtu_length, muscle_tendon_parameters_num, casadi_function)
 
         x_opt_tibialis = results['tibialis']['x_opt']
         x_opt_soleus = results['soleus']['x_opt']
         x_opt_gastrocnemius = results['gastrocnemius']['x_opt']
-        # rooted_variables = [fiber length, pennation angle and tendon length]
 
         state_tibialis = results['tibialis']['state']
         state_soleus = results['soleus']['state']
         state_gastrocnemius = results['gastrocnemius']['state']
 
-        if state_tibialis == 'fail' or state_soleus == 'fail' or state_tibialis == 'fail' or state_gastrocnemius == 'fail':
+        if state_tibialis == 'fail' or state_soleus == 'fail' or state_gastrocnemius == 'fail':
             n_trials_fail += 1
         else:
             n_trials_succeeds += 1
 
-            rooted_fiber_length = np.array(
-                [x_opt_tibialis[0, 0], x_opt_soleus[0, 0], x_opt_gastrocnemius[0, 0]]).flatten()
-            rooted_pennation_angle = np.array(
-                [x_opt_tibialis[1, 0], x_opt_soleus[1, 0], x_opt_gastrocnemius[1, 0]]).flatten()
-            rooted_tendon_length = np.array(
-                [x_opt_tibialis[2, 0], x_opt_soleus[2, 0], x_opt_gastrocnemius[2, 0]]).flatten()
-
-
             rooted_variables = np.array([x_opt_tibialis[0, 0], x_opt_soleus[0, 0], x_opt_gastrocnemius[0, 0],
                                          x_opt_tibialis[1, 0], x_opt_soleus[1, 0], x_opt_gastrocnemius[1, 0],
-                                         x_opt_tibialis[2, 0], x_opt_soleus[2, 0],
-                                         x_opt_gastrocnemius[2, 0]]).flatten()
+                                         x_opt_tibialis[2, 0], x_opt_soleus[2, 0], x_opt_gastrocnemius[2, 0]]).flatten()
 
             all_state = np.concatenate([neuromusculoskeletal_state_num, rooted_variables])
 
             ankle_torque = casadi_function['get_joint_moment'](all_state, muscle_tendon_parameters_num)
 
             # 2.7 extract variable
-            # rooted = vertcat(tendon length,fiber lenght,,pennationAngle)
+            # rooted = vertcat(tendon length,fiber length,,pennationAngle)
             tibialis_fiber_length = float(x_opt_tibialis[0])
             tibialis_pennation_angle = float(x_opt_tibialis[1])
             tibialis_tendon_length = float(x_opt_tibialis[2])
@@ -1474,7 +1854,7 @@ def build_protocol(ramp_levels=np.array([0.1, 0.2, 0.3, 0.4, 0.9]),
     # ---------- Protocol 1 : passive mobilization ---------- #
     qk_P1 = np.array([0.0])
     qa_P1 = np.arange(-25, 20 + passive_step, passive_step, dtype=float)
-    a_P1  = np.array([[0.0, 0.0, 0.0]])
+    a_P1  = np.array([[0.01, 0.01, 0.01]])
 
     # ---------- Protocol 2 : isometric ramp, knee extended ---------- #
     qk_P2 = np.array([0.0])
@@ -1482,27 +1862,29 @@ def build_protocol(ramp_levels=np.array([0.1, 0.2, 0.3, 0.4, 0.9]),
 
     # Dorsiflexion : tibialis (echo sur le tibialis)
     a_P2_DF = np.column_stack([ramp_levels,
-                               np.zeros_like(ramp_levels),
-                               np.zeros_like(ramp_levels)])
+                               np.full_like(ramp_levels, 0.01),
+                               np.full_like(ramp_levels, 0.01)])
 
     # Plantar flexion, série A : solear nominal, gastroc jitteré (echo sur le gastroc)
-    a_P2_PF_A = np.column_stack([np.zeros_like(ramp_levels),
+    a_P2_PF_A = np.column_stack([np.full_like(ramp_levels, 0.01),
                                  ramp_levels,
                                  _jitter(ramp_levels)])
 
     # Plantar flexion,, série B : gastroc nominal, solear jitteré (echo sur le solear)
-    a_P2_PF_B = np.column_stack([np.zeros_like(ramp_levels),
+    a_P2_PF_B = np.column_stack([np.full_like(ramp_levels, 0.01),
                                  _jitter(ramp_levels),
                                  ramp_levels])
 
-    a_P2 = np.vstack([a_P2_DF, a_P2_PF_A, a_P2_PF_B])   # 5 + 5 + 5 = 15 level mesured
+    a_P2 = np.vstack([a_P2_DF, a_P2_PF_A, a_P2_PF_B])   # 5 + 5 + 5 = 15 level measured
 
     # ---------- Protocol 3 : isometric ramp, knee flexed ---------- # (echo sur le gastroc)
+
     qk_P3 = np.array([90.0])
     qa_P3 = np.array([0.0, -25.0])
-    a_P3  = np.column_stack([np.zeros_like(ramp_levels),
+    a_P3  = np.column_stack([np.full_like(ramp_levels, 0.01),
                              _jitter(ramp_levels),
                              ramp_levels])
+
 
     # ---------- Product cartésien par Protocol ---------- #
     def _cartesian(qk, qa, a):
@@ -1517,6 +1899,7 @@ def build_protocol(ramp_levels=np.array([0.1, 0.2, 0.3, 0.4, 0.9]),
     q_knee  = np.concatenate([qk1, qk2, qk3])
     q_ankle = np.concatenate([qa1, qa2, qa3])
     a_num   = np.vstack([a1, a2, a3])
+
 
     if to_radians:
         q_knee  = np.deg2rad(q_knee)
@@ -1846,8 +2229,6 @@ def nlp_verification(data, initial_guess, lower_band, upper_band, skeleton_num,
     lower_band = np.asarray(lower_band, dtype=float)
     upper_band = np.asarray(upper_band, dtype=float)
     initial_guess = np.asarray(initial_guess, dtype=float)
-    # lower_band = np.asarray(initial_guess, dtype=float)
-    # upper_band = np.asarray(initial_guess, dtype=float)
 
     assert np.all(lower_band <= upper_band), \
         f"lower_band > upper_band at: {np.where(lower_band > upper_band)[0]}"
@@ -1970,8 +2351,6 @@ def nlp_verification(data, initial_guess, lower_band, upper_band, skeleton_num,
     w0 = np.array(w0, dtype=float)
     lbw = np.array(lbw, dtype=float)
     ubw = np.array(ubw, dtype=float)
-    lbg = np.array(lbg, dtype=float)
-    ubg = np.array(ubg, dtype=float)
 
     # Global checks
     if np.any(np.isnan(w0)):
@@ -2175,8 +2554,270 @@ def nlp_verification(data, initial_guess, lower_band, upper_band, skeleton_num,
 
 
 def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
-                     muscle_tendon_parameters_num, unknown_parameters, casadi_function):
+                     muscle_tendon_parameters_num, unknown_parameters,
+                     casadi_function, param_index):
     """
+    Identify the muscle-tendon parameters declared 'sym' in param_config,
+    via an NLP. The set and order of optimized parameters are driven by
+    param_index (returned by get_initial_guess).
+
+    Args:
+        data (np.ndarray): Shape (15, n_trials).
+            Rows:
+              [0]     : measured joint torque (N.m)
+              [1:3]   : joint angles q (rad)
+              [3:6]   : muscle activations [0, 1]
+              [6:9]   : measured fiber lengths (m)
+              [9:12]  : measured pennation angles (rad)
+              [12:15] : measured tendon lengths (m)
+        initial_guess, lower_band, upper_band : optimized MTU parameters,
+            size n_opt = 3 * n_sym, ordered as param_index.
+        skeleton_num : skeleton geometry (.osim).
+        muscle_tendon_parameters_num : reference values (size n_opt), same
+            order as the optimized vector (only the 'sym' parameters).
+        unknown_parameters : SX vector of the n_opt unknowns (only 'sym').
+        casadi_function : dict of CasADi functions (fixed params already
+            hard-coded inside the generated equations).
+        param_index (dict): {param_name: {muscle: idx}} mapping each optimized
+            parameter/muscle to its index in the vector. Drives reporting.
+
+    Returns:
+        param_opt (np.ndarray): Shape (n_opt,) — estimated parameters,
+            same order as initial_guess / param_index.
+    """
+
+    # ============ Sanity checks ============ #
+    assert data.shape[0] == 15, f"data must be (15, n_trials), got {data.shape}"
+
+    initial_guess = np.asarray(initial_guess, dtype=float)
+    lower_band = np.asarray(lower_band, dtype=float)
+    upper_band = np.asarray(upper_band, dtype=float)
+
+    # Taille réelle du vecteur optimisé (ne dépend plus du nombre 12 codé en dur)
+    n_opt = unknown_parameters.shape[0]
+    assert initial_guess.shape[0] == n_opt, \
+        f"initial_guess ({initial_guess.shape[0]}) != unknown_parameters ({n_opt})"
+    assert lower_band.shape[0] == n_opt and upper_band.shape[0] == n_opt, \
+        "lower_band/upper_band incohérents avec unknown_parameters"
+
+    assert np.all(lower_band <= upper_band), \
+        f"lower_band > upper_band at: {np.where(lower_band > upper_band)[0]}"
+
+    n_trials = data.shape[1]
+    n_muscle = 3
+
+    # ============ [FIX 3] Scaling des paramètres MTU ============ #
+    # On optimise des ratios O(1) au lieu des valeurs physiques brutes.
+    scale = initial_guess.copy()
+    assert np.all(scale > 0), \
+        "initial_guess doit être strictement positif pour servir d'échelle"
+
+    up = unknown_parameters            # variable IPOPT (sans dimension, ~ O(1))
+    up_phys = up * scale               # valeurs physiques (uniquement les 'sym')
+
+    # ============ NLP set up ============ #
+    w, w0, lbw, ubw = [], [], [], []
+    g, lbg, ubg = [], [], []
+    j = []
+
+    e_torque, e_fiber, e_pennation = [], [], []
+
+    # Unknown MTU parameters (n_opt values), EN UNITÉS SCALÉES
+    w += [up]
+    w0 += [1.0] * n_opt                       # initial_guess / scale = 1
+    lbw += list(lower_band / scale)
+    ubw += list(upper_band / scale)
+
+    # ============ [FIX 4] Poids du coût = 1 / sigma**2 ============ #
+    sigma_torque = 0.02                                 # N.m
+    sigma_fiber = 0.005                                # ~5 mm en m
+    sigma_penn = np.deg2rad(5)                         # ~5° en rad
+
+    for trial in range(n_trials):
+        data_trial = data[:, trial]
+
+        measured_torque = data_trial[0]                 # N.m
+        q_trial = [0, 0, 0, 0] + list(data_trial[1:3])  # rad
+        a_trial = data_trial[3:6]                        # [0, 1]
+        measured_fiber_length = data_trial[6:9]          # m
+        measured_pennation_angle = data_trial[9:12]      # rad
+        measured_tendon_length = data_trial[12:15]       # m
+
+        musculoskeletal_states_trial = q_trial + list(skeleton_num)
+        neuromusculoskeletal_state_trial = np.concatenate(
+            [a_trial, musculoskeletal_states_trial]
+        )
+
+        mtu_length = casadi_function['get_mtu_length'](musculoskeletal_states_trial)
+
+        tendon_length_k = SX.sym(f"Tendon_Length_{trial}", n_muscle)
+        fiber_length_k = SX.sym(f"Fiber_Length_{trial}", n_muscle)
+        pennation_angle_k = SX.sym(f"Pennation_Angle_{trial}", n_muscle)
+
+        fl_meas = np.abs(measured_fiber_length)
+        tl_meas = np.abs(measured_tendon_length)
+        pa_meas = np.abs(measured_pennation_angle)
+
+        lb_fl = fl_meas - fl_meas * 0.1
+        ub_fl = fl_meas + fl_meas * 0.1
+
+        lb_pa = pa_meas - np.deg2rad(2)
+        ub_pa = pa_meas + np.deg2rad(2)
+        lb_pa = np.clip(lb_pa, 0 + epsilon, np.pi - epsilon)
+        ub_pa = np.clip(ub_pa, 0 + epsilon, np.pi - epsilon)
+
+        lb_tl = tl_meas - tl_meas * 0.005
+        ub_tl = tl_meas + tl_meas * 0.005
+
+        lb_block = np.concatenate([lb_fl, lb_pa, lb_tl])
+        ub_block = np.concatenate([ub_fl, ub_pa, ub_tl])
+
+        w0_k = np.concatenate([fl_meas, pa_meas, tl_meas])
+        w_k = vertcat(fiber_length_k, pennation_angle_k, tendon_length_k)
+
+        assert np.all(lb_block <= ub_block), \
+            f"Inverted bounds at trial {trial}"
+        assert np.all((w0_k >= lb_block - 1e-9) & (w0_k <= ub_block + 1e-9)), \
+            f"w0 out of bounds at trial {trial}: " \
+            f"w0_k={w0_k}, lb={lb_block}, ub={ub_block}"
+
+        w += [w_k]
+        w0 += list(w0_k)
+        lbw += list(lb_block)
+        ubw += list(ub_block)
+
+        # --- Equilibrium constraints (9 per trial) --- #
+        # up_phys ne contient que les 'sym' ; les 'fixed' sont déjà codés en
+        # dur dans les équations générées par get_model_equation.
+        k = vertcat(a_trial, mtu_length, up_phys)
+        constraints = casadi_function['equilibrium_error_all_muscle'](w_k, k)
+        g += [constraints]
+        lbg += [0] * 9
+        ubg += [0] * 9
+
+        # --- Torque simulation --- #
+        all_states = vertcat(SX(neuromusculoskeletal_state_trial.tolist()), w_k)
+        torque_simulated = casadi_function['get_joint_moment'](all_states, up_phys)
+
+        # --- Residuals --- #
+        e_torque_trials = measured_torque - torque_simulated
+        e_fiber_trials = measured_fiber_length - fiber_length_k
+        e_pennation_trials = measured_pennation_angle - pennation_angle_k
+
+        j += (e_torque_trials ** 2) / sigma_torque ** 2
+        j += sum1((e_fiber_trials ** 2) / sigma_fiber ** 2)
+        j += sum1((e_pennation_trials ** 2) / sigma_penn ** 2)
+
+        e_torque.append(e_torque_trials)
+        e_fiber.append(e_fiber_trials)
+        e_pennation.append(e_pennation_trials)
+
+    # ============ Assembly ============ #
+    w = vertcat(*w)
+    g = vertcat(*g)
+    print("J shape:", j.shape)
+    print(f"n_trials : {n_trials} | size(w) : {w.shape} | size(g) : {g.shape}")
+
+    w0 = np.array(w0, dtype=float)
+    lbw = np.array(lbw, dtype=float)
+    ubw = np.array(ubw, dtype=float)
+    lbg = np.array(lbg, dtype=float)
+    ubg = np.array(ubg, dtype=float)
+
+    if np.any(np.isnan(w0)):
+        print('NaNs in w0 at:', np.where(np.isnan(w0)))
+        return None
+    if np.any(np.isinf(w0)):
+        print('Infs in w0 at:', np.where(np.isinf(w0)))
+        return None
+    bad = np.where(lbw > ubw)[0]
+    if len(bad):
+        print(f'lbw > ubw at indices: {bad[:20]}...')
+        return None
+
+    print('w0 is valid')
+
+    # ============ NLP solver ============ #
+    """
+    opts_ipopt = {
+        "ipopt.max_iter": 2500,
+        "ipopt.tol": 1e-4,
+        "ipopt.print_info_string": "yes",
+        "ipopt.linear_solver": "mumps",
+    }
+    """
+    opts_ipopt = {
+        "ipopt.max_iter": 1000,
+        "ipopt.mu_strategy": "monotone",  # plus stable qu'adaptive quand ça diverge
+        "ipopt.bound_push": 1e-2,
+        "ipopt.bound_frac": 1e-2,
+        "ipopt.mu_init": 1e-1,
+        "ipopt.linear_solver": "mumps",
+        "ipopt.print_info_string": "yes",
+    }
+
+    nlp = {'x': w, 'f': j, 'g': g}
+    solver = nlpsol('solver', 'ipopt', nlp, opts_ipopt)
+
+    sol = solver(x0=w0, lbx=lbw, ubx=ubw, lbg=lbg, ubg=ubg)
+
+    # ============ Extraction ============ #
+    w_opt = sol['x'].full().flatten()
+    cost = sol['f'].full().item()
+
+    # [FIX 3] dé-scaler les n_opt premiers éléments
+    param_opt = w_opt[:n_opt] * scale
+
+    err_param = np.abs(muscle_tendon_parameters_num - param_opt)
+
+    # ============ Reporting générique piloté par param_index ============ #
+    _report_nlp_results(param_index, muscles=['ta', 'sol', 'gast'],
+                        param_opt=param_opt,
+                        ref=muscle_tendon_parameters_num,
+                        err=err_param, cost=cost, n_trials=n_trials)
+
+    return param_opt
+
+
+def _report_nlp_results(param_index, muscles, param_opt, ref, err, cost,
+                        n_trials):
+    """Affichage des résultats, ordre et contenu dérivés de param_index."""
+    # Unités lisibles selon le paramètre (affichage uniquement)
+    UNIT = {
+        'l0m':  ('m',   1.0),
+        'lst':  ('m',   1.0),
+        'phi0': ('deg', None),   # converti via rad2deg
+        'f0m':  ('N',   1.0),
+        'km':   ('-',   1.0),
+        'kt':   ('-',   1.0),
+    }
+
+    def _fmt(p, idx):
+        val_opt = param_opt[idx]
+        val_ref = ref[idx]
+        val_err = err[idx]
+        unit, _ = UNIT.get(p, ('', 1.0))
+        if p == 'phi0':
+            return (f"{np.rad2deg(val_ref):8.2f} | {np.rad2deg(val_opt):8.2f} | "
+                    f"{np.rad2deg(val_err):7.2f}  [deg]")
+        return f"{val_ref:8.4f} | {val_opt:8.4f} | {val_err:7.4f}  [{unit}]"
+
+    print("\n" + "=" * 70)
+    print(f"Résultats NLP — n_trials = {n_trials} | coût = {cost:.4e}")
+    print("=" * 70)
+    print(f"{'Param':<10} {'Ref':>8} | {'Estimé':>8} | {'|Err|':>7}")
+    print("-" * 70)
+    for p in param_index:                      # ordre = ordre d'optimisation
+        for m in muscles:
+            idx = param_index[p][m]
+            print(f"{p+'_'+m:<10} {_fmt(p, idx)}")
+    print("=" * 70)
+
+"""
+def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
+                     muscle_tendon_parameters_num, unknown_parameters, casadi_function):
+
+
     Identify muscle-tendon parameters (ℓom, φo, Fom, ℓst) via an NLP.
 
     Args:
@@ -2196,16 +2837,15 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
 
     Returns:
         xopt (np.ndarray): Shape (12,) — estimated (ℓom, φo, Fom, ℓst).
-    """
+
 
     # ============ Sanity checks ============ #
     assert data.shape[0] == 15, f"data must be (15, n_trials), got {data.shape}"
 
+    initial_guess = np.asarray(initial_guess, dtype=float)
     lower_band = np.asarray(lower_band, dtype=float)
     upper_band = np.asarray(upper_band, dtype=float)
-    initial_guess = np.asarray(initial_guess, dtype=float)
-    # lower_band = np.asarray(initial_guess, dtype=float)
-    # upper_band = np.asarray(initial_guess, dtype=float)
+
 
     assert np.all(lower_band <= upper_band), \
         f"lower_band > upper_band at: {np.where(lower_band > upper_band)[0]}"
@@ -2245,7 +2885,7 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
         a_trial = data_trial[3:6]  # [0, 1]
         measured_fiber_length = data_trial[6:9]  # m
         measured_pennation_angle = data_trial[9:12]  # rad
-        mesured_tendon_length = data_trial[12:15]  # m
+        measured_tendon_length = data_trial[12:15]  # m
 
         musculoskeletal_states_trial = q_trial + list(skeleton_num)
         neuromusculoskeletal_state_trial = np.concatenate(
@@ -2256,31 +2896,34 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
         mtu_length = casadi_function['get_mtu_length'](musculoskeletal_states_trial)
 
         # --- Trial-specific decision variables ---
-        tendon_length_k = SX.sym(f"Tendon_Length_{trial + 1}", n_muscle)
-        fiber_length_k = SX.sym(f"Fiber_Length_{trial + 1}", n_muscle)
-        pennation_angle_k = SX.sym(f"Pennation_Angle_{trial + 1}", n_muscle)
+        tendon_length_k = SX.sym(f"Tendon_Length_{trial}", n_muscle)
+        fiber_length_k = SX.sym(f"Fiber_Length_{trial}", n_muscle)
+        pennation_angle_k = SX.sym(f"Pennation_Angle_{trial}", n_muscle)
 
         # --- Physiological bounds (robust to sign) ---
         fl_meas = np.abs(measured_fiber_length)
-        tl_meas = np.abs(mesured_tendon_length)
+        tl_meas = np.abs(measured_tendon_length)
+        pa_meas = np.abs(measured_pennation_angle)
 
         # Fiber length: positive, around the measured value
-        lb_fl = fl_meas - fl_meas * 0.3
-        ub_fl = fl_meas + fl_meas * 0.3
+        lb_fl = fl_meas - fl_meas * 0.1
+        ub_fl = fl_meas + fl_meas * 0.1
 
         # Pennation: physiological bounds, sign is free
-        lb_pa = np.full(n_muscle, -np.pi / 2 + 1e-3)
-        ub_pa = np.full(n_muscle, np.pi / 2 - 1e-3)
+        lb_pa = pa_meas - np.deg2rad(2)
+        ub_pa = pa_meas + np.deg2rad(2)
+        lb_pa = np.clip(lb_pa,0+epsilon,np.pi-epsilon)
+        ub_pa = np.clip(ub_pa,0+epsilon,np.pi-epsilon)
 
         # Tendon length: positive, tight range
-        lb_tl = tl_meas * 0.05
-        ub_tl = tl_meas * 1.05
+        lb_tl = tl_meas - tl_meas * 0.005
+        ub_tl = tl_meas + tl_meas * 0.005
 
         lb_block = np.concatenate([lb_fl, lb_pa, lb_tl])
         ub_block = np.concatenate([ub_fl, ub_pa, ub_tl])
 
         # Initial guess, with lengths forced positive
-        w0_k = np.concatenate([fl_meas, measured_pennation_angle, tl_meas])
+        w0_k = np.concatenate([fl_meas, pa_meas, tl_meas])
         w_k = vertcat(fiber_length_k, pennation_angle_k, tendon_length_k)
 
         # Safety: check bounds consistency and that w0 lies within them
@@ -2315,6 +2958,7 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
         j += sum1(w_length * e_fiber_trials ** 2)
         j += sum1(w_angle * e_pennation_trials ** 2)
 
+
         e_torque.append(e_torque_trials)
         e_fiber.append(e_fiber_trials)
         e_pennation.append(e_pennation_trials)
@@ -2348,7 +2992,7 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
     # ============ NLP solver ============ #
 
     opts_ipopt = {
-        "ipopt.max_iter": 5000
+        "ipopt.max_iter": 2500
     }
 
     nlp = {'x': w, 'f': j, 'g': g}
@@ -2372,6 +3016,12 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
     print(f"diff Fom : {err_param[6:9]}")
     print(f"diff ℓst : {err_param[9:12]}")
 
+    print("input muscle-tendon parameters:")
+    print(f"ℓom : {muscle_tendon_parameters_num[0:3]}")
+    print(f"φo  : {muscle_tendon_parameters_num[3:6]}")
+    print(f"Fom : {muscle_tendon_parameters_num[6:9]}")
+    print(f"ℓst : {muscle_tendon_parameters_num[9:12]}")
+
     print("Estimated muscle-tendon parameters:")
     print(f"Cost : {cost}")
     print(f"ℓom : {param_opt[0:3]}")
@@ -2381,6 +3031,10 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
 
 
     return param_opt
+
+
+"""
+
 
 def generate_estimated_data(data, skeleton_num, muscle_tendon_parameters_num,
                             casadi_function,
@@ -2470,13 +3124,16 @@ def generate_estimated_data(data, skeleton_num, muscle_tendon_parameters_num,
         l_gast = float(mtu_length[2])
 
         # --- Équilibre muscle-tendon par muscle ---
-        x_ta, s_ta = root_muscle_dynamics(a_ta, l_ta, mtp_ta, 'tibialis', casadi_function)
-        x_sol, s_sol = root_muscle_dynamics(a_sol, l_sol, mtp_sol, 'soleus', casadi_function)
-        x_gast, s_gast = root_muscle_dynamics(a_gast, l_gast, mtp_gast, 'gastrocnemius', casadi_function)
+        x_ta, s_ta, cost = root_muscle_dynamics(a_ta, l_ta, mtp_ta, 'tibialis', casadi_function)
+        x_sol, s_sol, cost = root_muscle_dynamics(a_sol, l_sol, mtp_sol, 'soleus', casadi_function)
+        x_gast, s_gast, cost = root_muscle_dynamics(a_gast, l_gast, mtp_gast, 'gastrocnemius', casadi_function)
 
+        """
         if 'fail' in (s_ta, s_sol, s_gast):
             n_fail += 1
             continue
+            
+        """
 
         # Variables rootées
         fl = np.array([x_ta[0, 0], x_sol[0, 0], x_gast[0, 0]]).flatten()
@@ -2800,7 +3457,8 @@ def compare_datasets(data_a, data_b, header_data, label_a='A', label_b='B'):
     # Format colonné lisible
     with pd.option_context('display.float_format', '{:.3e}'.format,
                            'display.max_rows', None,
-                           'display.width', 200):
+                           'display.width', None):
+
         print(stats)
 
     # Résumé global
@@ -2824,220 +3482,248 @@ def compare_datasets(data_a, data_b, header_data, label_a='A', label_b='B'):
     print(f"{'='*70}\n")
     return stats
 
-import numpy as np
-
-
-def get_initial_guess(muscle_tendon_parameters_num, data,
-                       strategy='literature', verbose=True):
+def get_initial_guess(muscle_tendon_parameters_num, data, param_config,
+                      strategy='measured', verbose=True):
     """
     Génère initial_guess, lower_band et upper_band pour la calibration
-    muscle-tendon, avec des bornes physiologiquement cohérentes.
+    muscle-tendon, uniquement pour les paramètres déclarés 'sym' dans
+    param_config.
 
-    Stratégie de design :
-    --------------------
-    - 'literature' : bornes centrées sur les valeurs de littérature
-                     (Rajagopal 2015). Robuste aux biais de mesure.
-    - 'scaled'     : bornes centrées sur muscle_tendon_parameters_num
-                     (modèle déjà scalé sujet).
+    Conventions
+    -----------
+    param_config : dict ordonné {nom_param: 'sym' | 'fixed'} parmi
+        'l0m', 'phi0', 'f0m', 'lst', 'km', 'kt'.
+        - 'sym'   : paramètre optimisé → inclus dans le vecteur de sortie.
+        - 'fixed' : paramètre figé → exclu du vecteur de sortie, mais sa
+                    valeur reste présente dans muscle_tendon_parameters_num.
+        L'ordre des clés détermine à la fois :
+          (1) le layout de muscle_tendon_parameters_num (array de référence) :
+              un bloc [ta, sol, gast] par clé, dans l'ordre des clés ;
+          (2) l'ordre des paramètres 'sym' dans le vecteur optimisé.
+
+    muscle_tendon_parameters_num : np.ndarray plat, longueur 3*len(param_config).
+        Valeurs de référence scalées (modèle OpenSim), bloc [ta, sol, gast]
+        par paramètre, dans l'ordre des clés de param_config.
+
+    data : np.ndarray, shape (15, ntrials). Mesures écho :
+        indices 6-8  = fascicle length (ta, sol, gast)
+        indices 9-11 = pennation angle (ta, sol, gast)
+        indices 12-14= tendon length   (ta, sol, gast)
+
+    Stratégies
+    ----------
+    - 'literature' : bornes centrées sur les valeurs de littérature (Rajagopal 2015).
+    - 'scaled'     : bornes centrées sur muscle_tendon_parameters_num.
     - 'hybrid'     : init = scaled, bornes = scaled avec garde-fous littérature.
-    - 'measured'   : bornes data-driven, basées sur les min/max des mesures
-                     écho avec marge ±10%. Utile quand le sujet a des mesures
-                     écho fiables et qu'on veut ancrer les paramètres dans
-                     l'espace réellement exploré par le mouvement.
+    - 'measured'   : règles data-driven explicites :
+                       l0m  : init = mean(FL),  bornes = [min(FL), max(FL)]
+                       phi0 : init = mean(PA),  bornes = [min(PA), max(PA)]
+                       f0m  : init = num,        bornes = [0.5*num, 2.0*num]
+                       lst  : init = min(TL),    bornes = [min(TL)-0.1, min(TL)+0.02]
+                       km   : init = num,        bornes = [0.5*num, 2.0*num]
+                       kt   : init = num,        bornes = [0.5*num, 2.0*num]
 
-    Args:
-        muscle_tendon_parameters_num (np.ndarray): Shape (12,) - paramètres
-            de référence (typiquement issus d'un modèle scalé OpenSim).
-        data (np.ndarray): Shape (15, ntrials) - données mesurées.
-        strategy (str): 'literature', 'scaled', 'hybrid', ou 'measured'.
-        verbose (bool): affichage diagnostique.
-
-    Returns:
-        initial_guess, upper_band, lower_band : np.ndarray (12,)
+    Returns
+    -------
+    initial_guess, upper_band, lower_band : np.ndarray, shape (3*n_sym,)
+    param_index : dict {nom_param: {muscle: idx}} pour relire le vecteur optimisé.
     """
 
-    # === Indices ===
-    IDX_FL  = {'ta': 6,  'sol': 7,  'gast': 8}
-    IDX_PA  = {'ta': 9,  'sol': 10, 'gast': 11}
-    IDX_TL  = {'ta': 12, 'sol': 13, 'gast': 14}
-
-    IDX_LOM = {'ta': 0, 'sol': 1, 'gast': 2}
-    IDX_PHI = {'ta': 3, 'sol': 4, 'gast': 5}
-    IDX_FOM = {'ta': 6, 'sol': 7, 'gast': 8}
-    IDX_LST = {'ta': 9, 'sol': 10, 'gast': 11}
-
     muscles = ['ta', 'sol', 'gast']
+    ALL_PARAMS = ['l0m', 'phi0', 'f0m', 'lst', 'km', 'kt']
+
+    # === Indices des MESURES (data) ===
+    IDX_FL = {'ta': 6,  'sol': 7,  'gast': 8}   # fascicle length
+    IDX_PA = {'ta': 9,  'sol': 10, 'gast': 11}  # pennation angle
+    IDX_TL = {'ta': 12, 'sol': 13, 'gast': 14}  # tendon length
 
     # === Valeurs de référence (Rajagopal 2015) ===
     LITERATURE = {
-        'lom':  {'ta': 0.0683, 'sol': 0.0440, 'gast': 0.0600},
+        'l0m':  {'ta': 0.0683, 'sol': 0.0440, 'gast': 0.0600},
         'phi0': {'ta': np.deg2rad(9.6),
                  'sol': np.deg2rad(28.3),
                  'gast': np.deg2rad(9.9)},
         'lst':  {'ta': 0.2230, 'sol': 0.2450, 'gast': 0.3800},
     }
 
-    # === Bornes anatomiques absolues (garde-fous, jamais dépassées) ===
-    PHYSIO_HARD_BOUNDS = {
-        'lom':  {'ta': (0.040, 0.100), 'sol': (0.025, 0.060), 'gast': (0.035, 0.080)},
-        'phi0': {'ta': (np.deg2rad(2), np.deg2rad(20)),
-                 'sol': (np.deg2rad(15), np.deg2rad(45)),
-                 'gast': (np.deg2rad(2),  np.deg2rad(25))},
-        'lst':  {'ta': (0.180, 0.280), 'sol': (0.200, 0.300), 'gast': (0.320, 0.450)},
-    }
-
-    # === Marges (utilisées par literature/scaled/hybrid) ===
+    # === Marges (literature / scaled / hybrid) ===
     MARGINS = {
-        'lom':  {'low': 0.70, 'high': 1.30},
+        'l0m':  {'low': 0.70, 'high': 1.30},
         'phi0': {'low_rad': np.deg2rad(-10), 'high_rad': np.deg2rad(10)},
-        'fom':  {'low': 0.50, 'high': 2.5},
+        'f0m':  {'low': 0.10, 'high': 2.5},
         'lst':  {'low': 0.80, 'high': 1.25},
     }
 
-    # === Marge spécifique pour la stratégie 'measured' ===
-    MEASURED_MARGIN = 0.30  # ±30% des min/max mesurés
+    # === Facteurs scalés f0m / km / kt ===
+    SCALED_LOW  = 0.5
+    SCALED_HIGH = 3.0
 
-    initial_guess = np.zeros(12)
-    lower_band   = np.zeros(12)
-    upper_band   = np.zeros(12)
+    # === Marges lst en mètres (measured) ===
+    LST_MARGIN_LOW  = 0.20
+    LST_MARGIN_HIGH = 0.02
 
-    for m in muscles:
+    # ------------------------------------------------------------------
+    # Validation de param_config et de la stratégie
+    # ------------------------------------------------------------------
+    if not isinstance(param_config, dict):
+        raise TypeError("param_config doit être un dict {nom: 'sym'|'fixed'}.")
 
-        # ------------------------------------------------------------------
-        # STRATÉGIE 'measured' : bornes basées sur min/max des mesures ±10%
-        # ------------------------------------------------------------------
-        if strategy == 'measured':
-            # --- lom : à partir des longueurs de fibre mesurées ---
-            fl = data[IDX_FL[m], :]
-            fl = fl[~np.isnan(fl)]
-            fl_min, fl_max = np.min(fl), np.max(fl)
-            lom_lo = fl_min * (1 - MEASURED_MARGIN)
-            lom_hi = fl_max * (1 + MEASURED_MARGIN)
+    if strategy not in ('literature', 'scaled', 'hybrid', 'measured'):
+        raise ValueError(f"Strategy inconnue : {strategy}")
 
-            # init au centre
-            lom_center = 0.5 * (lom_lo + lom_hi)
+    ref_params = list(param_config.keys())          # ordre du modèle / array
+    unknown = [p for p in ref_params if p not in ALL_PARAMS]
+    if unknown:
+        raise ValueError(f"Paramètres inconnus dans param_config : {unknown}")
 
-            # --- phi0 : à partir des pennations mesurées ---
-            pa = data[IDX_PA[m], :]
-            pa = pa[~np.isnan(pa)]
-            pa_min, pa_max = np.min(pa), np.max(pa)
-            phi_lo = pa_min * (1 - MEASURED_MARGIN)
-            phi_hi = pa_max * (1 + MEASURED_MARGIN)
+    active = [p for p in ref_params if param_config[p] == 'sym']  # à optimiser
 
-            phi_center = 0.5 * (phi_lo + phi_hi)
+    if not active:
+        raise ValueError("Aucun paramètre 'sym' dans param_config.")
 
-            # --- lst : à partir des longueurs de tendon mesurées ---
-            # ATTENTION : le tendon ne peut pas être plus court que lst.
-            # Donc lst_hi <= min(tl) physiologiquement.
-            tl = data[IDX_TL[m], :]
-            tl = tl[~np.isnan(tl)]
-            tl_min, tl_max = np.min(tl), np.max(tl)
-            lst_lo = tl_min * (1 - MEASURED_MARGIN)
-            lst_hi = tl_max * (1 + MEASURED_MARGIN)
+    # ------------------------------------------------------------------
+    # Indices de l'array de référence, dérivés des paramètres 'sym'
+    # (l'array ne contient QUE les 'sym', un bloc [ta, sol, gast] chacun,
+    #  dans l'ordre d'apparition dans param_config)
+    # ------------------------------------------------------------------
+    expected_len = 3 * len(active)
+    if len(muscle_tendon_parameters_num) != expected_len:
+        raise ValueError(
+            f"muscle_tendon_parameters_num a {len(muscle_tendon_parameters_num)} "
+            f"éléments mais {len(active)} paramètres 'sym' ({active}) en attendent "
+            f"{expected_len} (un bloc [ta,sol,gast] par paramètre 'sym').")
 
-            lst_center = 0.5 * (lst_lo + lst_hi)
+    REF_IDX = {}
+    j = 0
+    for p in active:
+        REF_IDX[p] = {'ta': j, 'sol': j + 1, 'gast': j + 2}
+        j += 3
 
-            # --- Fom : pas mesurable, on garde la valeur scalée ±50% ---
-            fom_center = muscle_tendon_parameters_num[IDX_FOM[m]]
-            fom_lo = fom_center * MARGINS['fom']['low']
-            fom_hi = fom_center * MARGINS['fom']['high']
+    # ------------------------------------------------------------------
+    # Indices du vecteur optimisé (paramètres 'sym' uniquement, dans l'ordre)
+    # ------------------------------------------------------------------
+    param_index = {}
+    idx = 0
+    for p in active:
+        param_index[p] = {}
+        for m in muscles:
+            param_index[p][m] = idx
+            idx += 1
+    n_params = idx
 
-            initial_guess[IDX_LOM[m]] = lom_center
-            lower_band[IDX_LOM[m]]    = lom_lo
-            upper_band[IDX_LOM[m]]    = lom_hi
-            initial_guess[IDX_PHI[m]] = phi_center
-            lower_band[IDX_PHI[m]]    = phi_lo
-            upper_band[IDX_PHI[m]]    = phi_hi
-            initial_guess[IDX_FOM[m]] = fom_center
-            lower_band[IDX_FOM[m]]    = fom_lo
-            upper_band[IDX_FOM[m]]    = fom_hi
-            initial_guess[IDX_LST[m]] = lst_center
-            lower_band[IDX_LST[m]]    = lst_lo
-            upper_band[IDX_LST[m]]    = lst_hi
-            continue  # passer au muscle suivant
+    initial_guess = np.zeros(n_params)
+    lower_band    = np.zeros(n_params)
+    upper_band    = np.zeros(n_params)
 
-        # ------------------------------------------------------------------
-        # STRATÉGIES literature / scaled / hybrid (logique d'origine)
-        # ------------------------------------------------------------------
-        if strategy == 'literature':
-            lom_center = LITERATURE['lom'][m]
-            phi_center = LITERATURE['phi0'][m]
-            fom_center = muscle_tendon_parameters_num[IDX_FOM[m]]
-            lst_center = LITERATURE['lst'][m]
-        elif strategy in ('scaled', 'hybrid'):
-            lom_center = muscle_tendon_parameters_num[IDX_LOM[m]]
-            phi_center = muscle_tendon_parameters_num[IDX_PHI[m]]
-            fom_center = muscle_tendon_parameters_num[IDX_FOM[m]]
-            lst_center = muscle_tendon_parameters_num[IDX_LST[m]]
-        else:
-            raise ValueError(f"Strategy inconnue : {strategy}")
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _clean(arr):
+        arr = arr[~np.isnan(arr)]
+        if arr.size == 0:
+            raise ValueError("Aucune mesure valide (que des NaN).")
+        return arr
 
-        # --- lom ---
-        lom_lo = lom_center * MARGINS['lom']['low']
-        lom_hi = lom_center * MARGINS['lom']['high']
-        if strategy == 'hybrid':
-            lom_lo = max(lom_lo, LITERATURE['lom'][m] * 0.60)
-            lom_hi = min(lom_hi, LITERATURE['lom'][m] * 1.40)
-        initial_guess[IDX_LOM[m]] = lom_center
-        lower_band[IDX_LOM[m]]    = lom_lo
-        upper_band[IDX_LOM[m]]    = lom_hi
+    def _num(p, m):
+        """Valeur de référence scalée pour le paramètre p, muscle m."""
+        if p not in REF_IDX:
+            raise KeyError(
+                f"'{p}' est 'sym' mais absent de muscle_tendon_parameters_num.")
+        return muscle_tendon_parameters_num[REF_IDX[p][m]]
 
-        # --- phi0 ---
-        phi_lo = phi_center + MARGINS['phi0']['low_rad']
-        phi_hi = phi_center + MARGINS['phi0']['high_rad']
-        phi_lo = max(phi_lo, np.deg2rad(2))
-        phi_hi = min(phi_hi, np.deg2rad(40))
-        initial_guess[IDX_PHI[m]] = phi_center
-        lower_band[IDX_PHI[m]]    = phi_lo
-        upper_band[IDX_PHI[m]]    = phi_hi
+    def _compute_measured(p, m):
+        """Règles data-driven explicites de la stratégie 'measured'."""
+        if p == 'l0m':
+            fl = _clean(data[IDX_FL[m], :])
+            return np.mean(fl), np.min(fl), np.max(fl)
+        if p == 'phi0':
+            pa = _clean(data[IDX_PA[m], :])
+            return np.mean(pa), np.min(pa), np.max(pa)
+        if p == 'lst':
+            tl = _clean(data[IDX_TL[m], :])
+            tl_min = np.min(tl)
+            return tl_min, tl_min - LST_MARGIN_LOW, tl_min + LST_MARGIN_HIGH
+        # f0m, km, kt : scalé ±facteur
+        v = _num(p, m)
+        return v, SCALED_LOW * v, SCALED_HIGH * v
 
-        # --- Fom ---
-        fom_lo = fom_center * MARGINS['fom']['low']
-        fom_hi = fom_center * MARGINS['fom']['high']
-        initial_guess[IDX_FOM[m]] = fom_center
-        lower_band[IDX_FOM[m]]    = fom_lo
-        upper_band[IDX_FOM[m]]    = fom_hi
+    def _compute_centered(p, m):
+        """Stratégies literature / scaled / hybrid."""
+        if strategy == 'literature' and p in LITERATURE:
+            center = LITERATURE[p][m]
+        else:  # scaled, hybrid, ou paramètre sans référence littérature
+            center = _num(p, m)
 
-        # --- lst ---
-        lst_lo = lst_center * MARGINS['lst']['low']
-        lst_hi = lst_center * MARGINS['lst']['high']
-        initial_guess[IDX_LST[m]] = lst_center
-        lower_band[IDX_LST[m]]    = lst_lo
-        upper_band[IDX_LST[m]]    = lst_hi
+        if p == 'l0m':
+            lo = center * MARGINS['l0m']['low']
+            hi = center * MARGINS['l0m']['high']
+            if strategy == 'hybrid':
+                lo = max(lo, LITERATURE['l0m'][m] * 0.60)
+                hi = min(hi, LITERATURE['l0m'][m] * 1.40)
+            return center, lo, hi
+        if p == 'phi0':
+            lo = max(center + MARGINS['phi0']['low_rad'], np.deg2rad(2))
+            hi = min(center + MARGINS['phi0']['high_rad'], np.deg2rad(40))
+            return center, lo, hi
+        if p == 'f0m':
+            return (center,
+                    center * MARGINS['f0m']['low'],
+                    center * MARGINS['f0m']['high'])
+        if p == 'lst':
+            return (center,
+                    center * MARGINS['lst']['low'],
+                    center * MARGINS['lst']['high'])
+        # km, kt : scalé ±facteur (pas de logique littérature)
+        v = _num(p, m)
+        return v, SCALED_LOW * v, SCALED_HIGH * v
 
-    # === Diagnostic ===
+    # ------------------------------------------------------------------
+    # Remplissage du vecteur optimisé
+    # ------------------------------------------------------------------
+    for p in active:
+        for m in muscles:
+            if strategy == 'measured':
+                init, lo, hi = _compute_measured(p, m)
+            else:
+                init, lo, hi = _compute_centered(p, m)
+            i = param_index[p][m]
+            initial_guess[i] = init
+            lower_band[i]    = lo
+            upper_band[i]    = hi
+
+    # ------------------------------------------------------------------
+    # Diagnostic
+    # ------------------------------------------------------------------
     if verbose:
-        _print_initial_guess(initial_guess, lower_band, upper_band, muscles,
-                             IDX_LOM, IDX_PHI, IDX_FOM, IDX_LST, strategy)
-        _check_geometric_consistency(data, IDX_FL, IDX_PA, IDX_TL,
-                                     initial_guess, IDX_LOM, IDX_PHI, IDX_LST,
-                                     muscles)
+        _print_initial_guess(initial_guess, lower_band, upper_band,
+                             muscles, param_index, active, strategy)
+        # cohérence géométrique seulement si l0m, phi0 et lst sont tous 'sym'
+        if all(p in param_index for p in ('l0m', 'phi0', 'lst')):
+            _check_geometric_consistency(
+                data, IDX_FL, IDX_PA, IDX_TL, initial_guess,
+                param_index['l0m'], param_index['phi0'], param_index['lst'],
+                muscles)
 
-    return initial_guess, upper_band, lower_band
+    return initial_guess, upper_band, lower_band, param_index
 
-def _print_initial_guess(init, lo, hi, muscles, IDX_LOM, IDX_PHI, IDX_FOM, IDX_LST,strategy):
+
+def _print_initial_guess(init, lo, hi, muscles, param_index, active, strategy):
     """Affichage formaté de l'initial guess et des bornes."""
     print("=" * 78)
-    print("Initial guess (stratégie physiologique avec bornes centrées)")
+    print(f"Initial guess — stratégie '{strategy}' — params : {', '.join(active)}")
     print("=" * 78)
-    print(f"{'Param':<14} {'Init':>10} {'Lower':>10} {'Upper':>10} {'Marge L':>9} {'Marge U':>9}")
+    print(f"{'Param':<14} {'Init':>10} {'Lower':>10} {'Upper':>10} "
+          f"{'Marge L':>9} {'Marge U':>9}")
     print("-" * 78)
 
-    rows = []
-    for m in muscles:
-        rows.append(('lom_'+m, IDX_LOM[m]))
-    for m in muscles:
-        rows.append(('phi0_'+m, IDX_PHI[m]))
-    for m in muscles:
-        rows.append(('Fom_'+m, IDX_FOM[m]))
-    for m in muscles:
-        rows.append(('lst_'+m, IDX_LST[m]))
-
-    for label, i in rows:
-        margin_lo = (init[i] - lo[i]) / init[i] * 100 if init[i] != 0 else 0
-        margin_hi = (hi[i] - init[i]) / init[i] * 100 if init[i] != 0 else 0
-        print(f"{label:<14} {init[i]:>10.4f} {lo[i]:>10.4f} {hi[i]:>10.4f} "
-              f"{margin_lo:>8.1f}% {margin_hi:>8.1f}%")
+    for p in active:
+        for m in muscles:
+            i = param_index[p][m]
+            label = f"{p}_{m}"
+            margin_lo = (init[i] - lo[i]) / init[i] * 100 if init[i] != 0 else 0
+            margin_hi = (hi[i] - init[i]) / init[i] * 100 if init[i] != 0 else 0
+            print(f"{label:<14} {init[i]:>10.4f} {lo[i]:>10.4f} {hi[i]:>10.4f} "
+                  f"{margin_lo:>8.1f}% {margin_hi:>8.1f}%")
     print("=" * 78)
 
 
