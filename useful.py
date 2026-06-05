@@ -260,7 +260,6 @@ def get_fiber_passive_force_length(normalized_fiber_length, k_fiber, maximal_iso
 def get_tendon_force_length(normalized_tendon_length, k_tendon, maximal_isometric_force):
     # Tendon force-length (S1)
     c1 = 0.200;     c2 = 0.995;     c3 = 0.250  # tendon parameters
-
     """
         # hard max
     # exponetial forces (lt > tsl)
@@ -279,19 +278,21 @@ def get_tendon_force_length(normalized_tendon_length, k_tendon, maximal_isometri
     
     tendon_force = normalized_tendon_force_curve * maximal_isometric_force  # Non-normalized equation
     """
+    # --- Calcul de f(1) pour centrer la courbe ---
+    arg_at_1 = k_tendon * (1.0 - c2)
+    arg_safe_at_1 = 50.0 - log1p(exp(50.0 - arg_at_1))
+    f_at_1 = c1 * exp(arg_safe_at_1) - c3
+
+    # --- Courbe principale ---
     arg = k_tendon * (normalized_tendon_length - c2)
-    # saturation LISSE : log-sum-exp borne arg sans casser la dérivée
-    arg_safe = 50.0 - log1p(exp(50.0 - arg))   # = -softplus(-(arg-50)) + ... équivaut à min lisse
-
+    arg_safe = 50.0 - log1p(exp(50.0 - arg))
     normalized_tendon_force_curve = c1 * exp(arg_safe) - c3
-    normalized_tendon_force = if_else(
-        normalized_tendon_force_curve > 0,
-        normalized_tendon_force_curve,
-        0
-    )
-    normalized_tendon_force_curve = fmax(normalized_tendon_force_curve, 0)
 
-    tendon_force = normalized_tendon_force_curve * maximal_isometric_force  # Non-normalized equation
+    # --- Condition f(1) = 0 ---
+    normalized_tendon_force_curve = normalized_tendon_force_curve - f_at_1
+
+    normalized_tendon_force_curve = fmax(normalized_tendon_force_curve, 0)
+    tendon_force = normalized_tendon_force_curve * maximal_isometric_force
 
     return tendon_force
 
@@ -446,7 +447,6 @@ def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
     g7 = (fiber_force * cos(pennation_angle) - tendon_force) / maximal_isometric_force
 
 
-
     # --- Problème single-muscle : 3 inconnues, 3 équations --- #
     unknown_single = vertcat(fiber_length[0], pennation_angle[0], tendon_length[0])
     known_single = vertcat(a[0], l_mtu[0], muscle_tendon_parameters_single)
@@ -459,18 +459,6 @@ def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
         ['residuals'],
     )
 
-    opts = {
-        "ipopt.max_iter": 5000,
-        "ipopt.tol": 1e-3,  # tolérance principale (défaut 1e-8)
-        "ipopt.constr_viol_tol": 1e-3,  # tolérance contraintes (défaut 1e-4)
-        "ipopt.acceptable_tol": 1e-2,
-        "ipopt.acceptable_constr_viol_tol": 1e-2,
-        "ipopt.acceptable_iter": 20,
-        "ipopt.mu_strategy": "adaptive",
-        "ipopt.linear_solver": "mumps",  # ou ma57 si dispo
-        "ipopt.warm_start_init_point": "yes",
-        "ipopt.print_info_string": "yes",  # CRUCIAL pour diagnostic
-    }
 
     opts_newton_single = {
         "abstol": 1e-8,
@@ -2618,7 +2606,7 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
     # ============ NLP set up ============ #
     w, w0, lbw, ubw = [], [], [], []
     g, lbg, ubg = [], [], []
-    j = []
+    j = SX(0)
 
     e_torque, e_fiber, e_pennation = [], [], []
 
@@ -2738,7 +2726,7 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
     print('w0 is valid')
 
     # ============ NLP solver ============ #
-    """
+
     opts_ipopt = {
         "ipopt.max_iter": 2500,
         "ipopt.tol": 1e-4,
@@ -2755,7 +2743,7 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
         "ipopt.linear_solver": "mumps",
         "ipopt.print_info_string": "yes",
     }
-
+    """
     nlp = {'x': w, 'f': j, 'g': g}
     solver = nlpsol('solver', 'ipopt', nlp, opts_ipopt)
 
@@ -2777,6 +2765,12 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
                         err=err_param, cost=cost, n_trials=n_trials)
 
     return param_opt
+
+
+
+
+
+
 
 
 def _report_nlp_results(param_index, muscles, param_opt, ref, err, cost,
@@ -2805,7 +2799,7 @@ def _report_nlp_results(param_index, muscles, param_opt, ref, err, cost,
     print("\n" + "=" * 70)
     print(f"Résultats NLP — n_trials = {n_trials} | coût = {cost:.4e}")
     print("=" * 70)
-    print(f"{'Param':<10} {'Ref':>8} | {'Estimé':>8} | {'|Err|':>7}")
+    print(f"{'Param':<10} {'Ref':>8} | {'Estimé':>8} | {'|Diff|':>7}")
     print("-" * 70)
     for p in param_index:                      # ordre = ordre d'optimisation
         for m in muscles:
