@@ -38,7 +38,6 @@ Utilisation (recommandee) — un seul appel qui lance l'optim + le plot
         upper_band=upper_band,
         initial_guess=initial_guess,
         muscles=('ta', 'sol', 'gast'),
-        n_trials=n_trials,                  # active la decomposition de inf_du
     )
     w_opt = sol['x'].full().flatten()
 
@@ -76,17 +75,11 @@ def _to_1d(v):
 #  Figures
 # ===========================================================================
 
-DUAL_BLOCK_COLORS = {
-    "params": "tab:red",
-    "fiber": "tab:blue",
-    "pennation": "tab:green",
-    "tendon": "tab:orange",
-}
-DUAL_BLOCK_LABELS = {
-    "params": "params MTU",
-    "fiber": "fiber length",
-    "pennation": "pennation",
-    "tendon": "tendon length",
+DUAL_TERM_STYLE = {
+    "inf_du":     dict(color="k",          ls="--", marker="",  lw=1.4, label="inf_du (4a)"),
+    "grad_f":     dict(color="tab:blue",   ls="-",  marker=".", lw=1.0, label=r"$|\nabla f|$"),
+    "grad_g_lam": dict(color="tab:green",  ls="-",  marker=".", lw=1.0, label=r"$|\nabla g^{T}\lambda_g|$"),
+    "lam_x":      dict(color="tab:red",    ls="-",  marker=".", lw=1.0, label=r"$|\lambda_x|$"),
 }
 
 
@@ -101,14 +94,13 @@ def _create_ipopt_plot():
     # f, max|g|, inf_pr : une courbe noire chacun
     plots = [axs[i].plot([0], [1], "-", marker=".", color="k")[0] for i in range(3)]
 
-    # inf_du : total (noir pointille) + une courbe par bloc de variables
+    # inf_du : 4 courbes (total + 3 termes de l'equation 4a)
     du_lines = {}
-    du_lines["total"] = axs[3].plot([], [], "--", color="k", lw=1.2,
-                                    label="total")[0]
-    for name in ("params", "fiber", "pennation", "tendon"):
+    for name in ("inf_du", "grad_f", "grad_g_lam", "lam_x"):
+        st = DUAL_TERM_STYLE[name]
         du_lines[name] = axs[3].plot(
-            [], [], "-", marker=".", ms=3, color=DUAL_BLOCK_COLORS[name],
-            label=DUAL_BLOCK_LABELS[name])[0]
+            [], [], st["ls"], marker=st["marker"], ms=3,
+            color=st["color"], lw=st["lw"], label=st["label"])[0]
     axs[3].legend(fontsize=7, ncol=2, loc="upper right")
 
     fig.tight_layout()
@@ -125,20 +117,14 @@ def _update_ipopt_plot(plots, du_lines, axes, hist):
         if ypos:
             axes[i].set_ylim(min(ypos) * 0.5, max(ypos) * 2)
 
-    # inf_du : total + blocs
+    # inf_du + 3 termes
     n = len(hist["inf_du"])
     xs = range(n)
-    du_lines["total"].set_data(xs, hist["inf_du"])
-    all_pos = [v for v in hist["inf_du"] if v and v > 0]
-    has_blocks = len(hist["du_params"]) == n and n > 0
-    if has_blocks:
-        for name in ("params", "fiber", "pennation", "tendon"):
-            y = hist["du_" + name]
-            du_lines[name].set_data(xs, y)
-            all_pos += [v for v in y if v and v > 0]
-    else:
-        for name in ("params", "fiber", "pennation", "tendon"):
-            du_lines[name].set_data([], [])
+    all_pos = []
+    for name in ("inf_du", "grad_f", "grad_g_lam", "lam_x"):
+        y = hist[name]
+        du_lines[name].set_data(xs, y)
+        all_pos += [v for v in y if v and v > 0]
     axes[3].set_xlim(0, max(n, 1))
     if all_pos:
         axes[3].set_ylim(min(all_pos) * 0.5, max(all_pos) * 2)
@@ -215,43 +201,13 @@ class MtuOnlineCallback(cas.Callback):
     """
 
     def __init__(self, nx, ng, grad_f_func, grad_g_func, n_opt, out_queue,
-                 n_trials=None, name="mtu_cb"):
+                 name="mtu_cb"):
         cas.Callback.__init__(self)
         self.nx = int(nx)
         self.ng = int(ng)
         self.grad_f_func = grad_f_func
         self.grad_g_func = grad_g_func
         self.n_opt = int(n_opt)
-        self.out_queue = out_queue
-
-        # ---- Masques d'indices des blocs de w, pour decomposer inf_du ----
-        # Structure de w :
-        #   [0 : n_opt]                      -> parametres MTU (up)
-        #   puis par essai t, un bloc de 9 :
-        #     [n_opt + 9t      : n_opt+9t+3] -> fiber_length
-        #     [n_opt + 9t + 3  : n_opt+9t+6] -> pennation_angle
-        #     [n_opt + 9t + 6  : n_opt+9t+9] -> tendon_length
-        self.dual_blocks = None
-        if n_trials is not None:
-            n_trials = int(n_trials)
-            base = self.n_opt
-            fib = np.zeros(self.nx, dtype=bool)
-            pen = np.zeros(self.nx, dtype=bool)
-            ten = np.zeros(self.nx, dtype=bool)
-            for t in range(n_trials):
-                s = base + 9 * t
-                fib[s + 0:s + 3] = True
-                pen[s + 3:s + 6] = True
-                ten[s + 6:s + 9] = True
-            par = np.zeros(self.nx, dtype=bool)
-            par[0:self.n_opt] = True
-            self.dual_blocks = {
-                "params": par,
-                "fiber": fib,
-                "pennation": pen,
-                "tendon": ten,
-            }
-
         self.out_queue = out_queue
         self.construct(name, {})
 
@@ -290,25 +246,26 @@ class MtuOnlineCallback(cas.Callback):
         lam_g = np.array(a["lam_g"]).flatten()
 
         inf_pr = float(np.max(np.abs(g))) if g.size else 0.0
-        grad_f = np.array(self.grad_f_func(x)).flatten()
-        grad_g_lam = np.array(self.grad_g_func(x) @ lam_g).flatten() if g.size else 0.0 * grad_f
-        r = grad_f + grad_g_lam - lam_x          # residu dual complet (par variable)
-        inf_du = float(np.max(np.abs(r)))
 
-        # Decomposition de inf_du par bloc de variables (max|r| sur chaque bloc)
-        du_blocks = {}
-        if self.dual_blocks is not None:
-            absr = np.abs(r)
-            for name, mask in self.dual_blocks.items():
-                du_blocks[name] = float(np.max(absr[mask])) if mask.any() else 1e-12
-                du_blocks[name] = max(du_blocks[name], 1e-12)
+        grad_f = np.array(self.grad_f_func(x)).flatten()
+        grad_g_lam = (np.array(self.grad_g_func(x) @ lam_g).flatten()
+                      if g.size else np.zeros_like(grad_f))
+        eq_4a = grad_f + grad_g_lam - lam_x          # stationnarite KKT (4a)
+        inf_du = float(np.max(np.abs(eq_4a)))
+
+        # Decomposition de l'equation (4a) en ses 3 termes (pour diagnostic)
+        max_grad_f = float(np.max(np.abs(grad_f)))
+        max_grad_g_lam = float(np.max(np.abs(grad_g_lam)))
+        max_lam_x = float(np.max(np.abs(lam_x))) if lam_x.size else 0.0
 
         self.out_queue.put({
             "x": x, "f": f,
             "max_g": max(inf_pr, 1e-12),
             "inf_pr": max(inf_pr, 1e-12),
             "inf_du": max(inf_du, 1e-12),
-            "du_blocks": du_blocks,
+            "grad_f": max(max_grad_f, 1e-12),
+            "grad_g_lam": max(max_grad_g_lam, 1e-12),
+            "lam_x": max(max_lam_x, 1e-12),
         })
         return [0]
 
@@ -321,16 +278,14 @@ def run_with_live_plot(nlp, x0, lbx, ubx, lbg, ubg, opts_ipopt,
                        grad_f_func, grad_g_func,
                        param_index, scale, lower_band, upper_band, initial_guess,
                        muscles=("ta", "sol", "gast"),
-                       n_trials=None,
                        save_on_finish=True):
     """
     Lance le solveur IPOPT (thread de travail) et affiche le live plot
     (thread principal). Retourne le dict `sol` de CasADi a la fin.
 
     opts_ipopt : NE PAS y mettre 'iteration_callback' (ajoute automatiquement).
-    n_trials   : nombre d'essais. Si fourni, le graphe inf_du est decompose
-                 en 4 courbes colorees (params MTU / fiber / pennation / tendon).
-                 Si None, inf_du reste une seule courbe (total).
+    Le graphe inf_du affiche 4 courbes : inf_du (4a), |grad_f|,
+    |grad_g^T lam_g| et |lam_x|, pour diagnostiquer quel terme domine.
     """
     n_opt = int(_to_1d(initial_guess).shape[0])
     w = nlp["x"]
@@ -339,8 +294,7 @@ def run_with_live_plot(nlp, x0, lbx, ubx, lbg, ubg, opts_ipopt,
     ng = g.shape[0]
 
     data_q = _queue.Queue()
-    callback = MtuOnlineCallback(nx, ng, grad_f_func, grad_g_func, n_opt, data_q,
-                                 n_trials=n_trials)
+    callback = MtuOnlineCallback(nx, ng, grad_f_func, grad_g_func, n_opt, data_q)
 
     opts = dict(opts_ipopt)
     opts["iteration_callback"] = callback
@@ -365,9 +319,8 @@ def run_with_live_plot(nlp, x0, lbx, ubx, lbg, ubg, opts_ipopt,
     p_fig, p_plots, p_axes, p_names = _create_param_plot(
         param_index, lower_band, upper_band, initial_guess, muscles)
 
-    ip_hist = {k: [] for k in ("f", "max_g", "inf_pr", "inf_du")}
-    for name in ("params", "fiber", "pennation", "tendon"):
-        ip_hist["du_" + name] = []
+    ip_hist = {k: [] for k in
+               ("f", "max_g", "inf_pr", "inf_du", "grad_f", "grad_g_lam", "lam_x")}
     p_hist = {(p, m): [] for p in p_names for m in muscles}
 
     worker.start()
@@ -377,12 +330,9 @@ def run_with_live_plot(nlp, x0, lbx, ubx, lbg, ubg, opts_ipopt,
         drained = False
         while not data_q.empty():
             a = data_q.get()
-            for k in ("f", "max_g", "inf_pr", "inf_du"):
+            for k in ("f", "max_g", "inf_pr", "inf_du",
+                      "grad_f", "grad_g_lam", "lam_x"):
                 ip_hist[k].append(a[k])
-            du = a.get("du_blocks") or {}
-            for name in ("params", "fiber", "pennation", "tendon"):
-                if name in du:
-                    ip_hist["du_" + name].append(du[name])
             _update_ipopt_plot(ip_plots, ip_du_lines, ip_axes, ip_hist)
             _update_param_plot(p_plots, p_axes, p_names, muscles, p_hist,
                                param_index, a["x"], scale, n_opt)

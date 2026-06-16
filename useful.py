@@ -2267,7 +2267,6 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
         upper_band=upper_band,
         initial_guess=initial_guess,
         muscles=('ta', 'sol', 'gast'),
-        n_trials=n_trials,
     )
 
     """
