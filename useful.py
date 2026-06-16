@@ -1,12 +1,13 @@
 import os
 import numpy as np
 import pandas as pd
-from casadi import SX, DM, vertcat, horzcat, Function, sqrt, exp, if_else, logic_and, sum1, jacobian, rootfinder, nlpsol, cos, sin, fmin, fmax, log1p,log
+from casadi import SX, DM, vertcat, horzcat, Function, sqrt, exp, if_else, logic_and, sum1, jacobian, rootfinder, nlpsol, cos, sin, fmin, fmax, log1p,log, gradient
 import math
 import matplotlib.pyplot as plt
 from fontTools.misc.bezierTools import epsilon
 from matplotlib.widgets import Slider
 import matplotlib
+from live_plot_utils import OnlineCallback
 
 matplotlib.use('TkAgg')  # or 'Qt5Agg', depending on your environment
 
@@ -260,24 +261,7 @@ def get_fiber_passive_force_length(normalized_fiber_length, k_fiber, maximal_iso
 def get_tendon_force_length(normalized_tendon_length, k_tendon, maximal_isometric_force):
     # Tendon force-length (S1)
     c1 = 0.200;     c2 = 0.995;     c3 = 0.250  # tendon parameters
-    """
-        # hard max
-    # exponetial forces (lt > tsl)
-    normalized_tendon_force_curve = c1 * exp(k_tendon * (normalized_tendon_length - c2)) - c3
 
-    # non-negative forces (lt < tsl)
-    normalized_tendon_force_curve = if_else(
-        normalized_tendon_force_curve > 0,
-        normalized_tendon_force_curve,
-        0
-    )
-    
-    normalized_tendon_force_curve = fmin(normalized_tendon_force_curve,50)
-    # non-negative forces
-    normalized_tendon_force_curve = fmax(normalized_tendon_force_curve, 0)
-    
-    tendon_force = normalized_tendon_force_curve * maximal_isometric_force  # Non-normalized equation
-    """
     # --- Calcul de f(1) pour centrer la courbe ---
     arg_at_1 = k_tendon * (1.0 - c2)
     arg_safe_at_1 = 50.0 - log1p(exp(50.0 - arg_at_1))
@@ -292,7 +276,7 @@ def get_tendon_force_length(normalized_tendon_length, k_tendon, maximal_isometri
     normalized_tendon_force_curve = normalized_tendon_force_curve - f_at_1
 
     normalized_tendon_force_curve = fmax(normalized_tendon_force_curve, 0)
-    tendon_force = normalized_tendon_force_curve * maximal_isometric_force
+    tendon_force = (normalized_tendon_force_curve * maximal_isometric_force) # /k_tendon
 
     return tendon_force
 
@@ -821,7 +805,7 @@ def root_muscle_dynamics(a, lmtu, parameters, muscle_name, casadi_function):
     """
     lim_residuals = 1e-9
     equilibrium_status = 'fail'
-    max_attempts = 500
+    max_attempts = 50
     attempt = 0
 
     parameters_name = casadi_function['mtu_parameters_name']
@@ -1175,10 +1159,6 @@ def x_start_equi_mixte(a, lmtu, parameters, rng=None):
 
     return np.array([fiber_length, pennation_angle, tendon_length])
 
-
-
-
-
 def get_named_params(parameters, param_labels, required):
     """
     Extract specific parameters by name from a labelled vector.
@@ -1205,483 +1185,6 @@ def get_named_params(parameters, param_labels, required):
         raise KeyError(f"Missing parameters: {missing}. "
                        f"Available: {list(params.keys())}")
     return tuple(params[k] for k in required)
-
-def plot_force_length_activation_3d(
-    a,
-    fiber_length,
-    tendon_length,
-    muscle_tendon_parameters,
-    get_fiber_force_from_fiber_length,
-    get_tendon_force_from_tendon_length,
-    muscle_idx: int = 1,
-    muscle_names: list = None,
-    n_grid: int = 50,
-    normalize: bool = True,
-    elev: int = 15,
-    azim: int = -180,
-    cmap: str = "cividis",
-):
-    """
-    Représentation 3D force-longueur-activation pour un muscle d'un système
-    musculo-tendineux multi-muscles (vecteurs CasADi de taille 3).
-
-    Convention des paramètres (12) :
-        [l0m_1, l0m_2, l0m_3,
-         phi0_1, phi0_2, phi0_3,
-         f0m_1, f0m_2, f0m_3,
-         lst_1, lst_2, lst_3]
-
-    Convention des indices muscles : 1, 2, 3 (1-indexé).
-    """
-    # ---------- coercition en arrays numpy ----------
-    a = np.asarray(a, dtype=float).flatten()
-    fiber_length = np.asarray(fiber_length, dtype=float).flatten()
-    tendon_length = np.asarray(tendon_length, dtype=float).flatten()
-    params = np.asarray(muscle_tendon_parameters, dtype=float).flatten()
-
-    n_muscles = 3
-    assert a.size == n_muscles
-    assert fiber_length.size == n_muscles
-    assert tendon_length.size == n_muscles
-    assert params.size == 12
-    assert muscle_idx in (1, 2, 3), "muscle_idx doit être 1, 2 ou 3"
-
-    if muscle_names is None:
-        muscle_names = [f"Muscle {i}" for i in (1, 2, 3)]
-
-    # ---------- extraction des paramètres du muscle d'intérêt ----------
-    # Paramètres rangés par type : [l0m×3, phi0×3, f0m×3, lst×3]
-    p_offset = muscle_idx - 1
-    l0m = float(params[p_offset + 0])
-    f0m = float(params[p_offset + 6])
-    lst = float(params[p_offset + 9])
-
-    # index 0-based pour accéder aux vecteurs d'état (a, fiber_length, tendon_length)
-    m = muscle_idx - 1
-
-    # ---------- helpers d'évaluation des fonctions CasADi vectorielles ----------
-    def eval_fiber_force(a_scalar, l_scalar):
-        a_vec = a.copy()
-        l_vec = fiber_length.copy()
-        a_vec[m] = a_scalar
-        l_vec[m] = l_scalar
-        out = np.array(
-            get_fiber_force_from_fiber_length(a_vec, l_vec, params)
-        ).flatten()
-        return float(out[m])
-
-    def eval_tendon_force(lt_scalar):
-        lt_vec = tendon_length.copy()
-        lt_vec[m] = lt_scalar
-        out = np.array(
-            get_tendon_force_from_tendon_length(lt_vec, params)
-        ).flatten()
-        return float(out[m])
-
-    # ---------- grille muscle ----------
-    fl_range = np.linspace(0.5 * l0m, 1.6 * l0m, n_grid)
-    a_range = np.linspace(0.0, 1.0, n_grid)
-    A_grid, L_grid = np.meshgrid(a_range, fl_range)
-
-    passive_force = np.zeros_like(L_grid)
-    active_force = np.zeros_like(L_grid)
-    total_force = np.zeros_like(L_grid)
-
-    for i in range(L_grid.shape[0]):
-        for j in range(L_grid.shape[1]):
-            l = L_grid[i, j]
-            act = A_grid[i, j]
-            try:
-                f_pass = eval_fiber_force(0.0, l)
-                f_tot = eval_fiber_force(act, l)
-                passive_force[i, j] = f_pass
-                total_force[i, j] = f_tot
-                active_force[i, j] = f_tot - f_pass
-            except Exception as e:
-                print(f"[fiber] erreur i={i}, j={j}, l={l}, a={act}: {e}")
-                passive_force[i, j] = np.nan
-                active_force[i, j] = np.nan
-                total_force[i, j] = np.nan
-
-    # ---------- point de fonctionnement courant ----------
-    a_pt = a[m]
-    fl_pt_raw = fiber_length[m]
-    f_pass_pt = eval_fiber_force(0.0, fl_pt_raw)
-    f_tot_pt = eval_fiber_force(a_pt, fl_pt_raw)
-    f_act_pt = f_tot_pt - f_pass_pt
-
-    # ---------- courbe tendon ----------
-    lt_range = np.linspace(0.97 * lst, 1.04 * lst, n_grid * 4)
-    tendon_curve = np.array([eval_tendon_force(lt) for lt in lt_range])
-    lt_pt_raw = tendon_length[m]
-    f_tendon_pt = eval_tendon_force(lt_pt_raw)
-
-    # ---------- normalisation ----------
-    if normalize:
-        L_plot = L_grid / l0m
-        fl_pt = fl_pt_raw / l0m
-        passive_plot = passive_force / f0m
-        active_plot = active_force / f0m
-        total_plot = total_force / f0m
-        f_pass_pt_plot = f_pass_pt / f0m
-        f_act_pt_plot = f_act_pt / f0m
-        f_tot_pt_plot = f_tot_pt / f0m
-
-        lt_plot = lt_range / lst
-        lt_pt_plot = lt_pt_raw / lst
-        tendon_curve_plot = tendon_curve / f0m
-        f_tendon_pt_plot = f_tendon_pt / f0m
-
-        ylabel_l = r"$\tilde{l}_f = l_f / l_0^m$"
-        zlabel_F = r"$\tilde{F} = F / F_0^m$"
-        xlabel_lt = r"$\tilde{l}_t = l_t / l_{st}$"
-    else:
-        L_plot = L_grid
-        fl_pt = fl_pt_raw
-        passive_plot, active_plot, total_plot = passive_force, active_force, total_force
-        f_pass_pt_plot, f_act_pt_plot, f_tot_pt_plot = f_pass_pt, f_act_pt, f_tot_pt
-
-        lt_plot = lt_range
-        lt_pt_plot = lt_pt_raw
-        tendon_curve_plot = tendon_curve
-        f_tendon_pt_plot = f_tendon_pt
-
-        ylabel_l = "Longueur de fibre (m)"
-        zlabel_F = "Force (N)"
-        xlabel_lt = "Longueur de tendon (m)"
-
-    # ---------- figure ----------
-    fig = plt.figure(figsize=(20, 5.2))
-    fig.suptitle(
-        f"Force – longueur – activation : {muscle_names[m]}",
-        fontsize=13, fontweight="bold", y=1.02,
-    )
-
-    titles = ["Force passive", "Force active", "Force totale (passive + active)"]
-    surfaces = [passive_plot, active_plot, total_plot]
-    points_z = [f_pass_pt_plot, f_act_pt_plot, f_tot_pt_plot]
-    axes_3d = []
-
-    for k, (title, F_grid, z_pt) in enumerate(zip(titles, surfaces, points_z)):
-        ax = fig.add_subplot(1, 4, k + 1, projection="3d")
-        surf = ax.plot_surface(
-            A_grid, L_plot, F_grid,
-            cmap=cmap, edgecolor="none", alpha=0.92, antialiased=True,
-        )
-        ax.scatter(
-            [a_pt], [fl_pt], [z_pt],
-            color="k", s=80, marker="*", depthshade=False,
-            edgecolor="white", linewidth=0.8, zorder=10,
-        )
-        zmin = np.nanmin(F_grid)
-        ax.plot([a_pt, a_pt], [fl_pt, fl_pt], [zmin, z_pt],
-                color="k", lw=0.6, ls=":")
-
-        ax.set_title(title, fontsize=11, pad=8)
-        ax.set_xlabel("Activation $a$", fontsize=9, labelpad=4)
-        ax.set_ylabel(ylabel_l, fontsize=9, labelpad=4)
-        ax.set_zlabel(zlabel_F, fontsize=9, labelpad=4)
-        ax.tick_params(labelsize=8)
-        ax.view_init(elev=elev, azim=azim)
-        ax.invert_yaxis()
-        fig.colorbar(surf, ax=ax, shrink=0.55, aspect=14, pad=0.08)
-        axes_3d.append(ax)
-
-    # ---------- panneau tendon ----------
-    ax_t = fig.add_subplot(1, 4, 4)
-    ax_t.fill_between(lt_plot, 0, tendon_curve_plot, color="#BA7517", alpha=0.15)
-    ax_t.plot(lt_plot, tendon_curve_plot, color="#BA7517", lw=2.4, label="Force tendon")
-    ax_t.scatter([lt_pt_plot], [f_tendon_pt_plot], color="k", marker="*",
-                 s=110, zorder=5, label="Point courant")
-    ax_t.set_title("Force tendon", fontsize=11, pad=8)
-    ax_t.set_xlabel(xlabel_lt, fontsize=10)
-    ax_t.set_ylabel(zlabel_F, fontsize=10)
-    ax_t.tick_params(labelsize=9)
-    ax_t.grid(True, alpha=0.3, lw=0.6)
-    ax_t.spines[["top", "right"]].set_visible(False)
-    ax_t.legend(fontsize=8.5, frameon=False, loc="upper left")
-
-    plt.tight_layout()
-    return fig, (*axes_3d, ax_t)
-
-def plot_all_muscles_3d(
-    a,
-    fiber_length,
-    tendon_length,
-    muscle_tendon_parameters,
-    get_fiber_force_from_fiber_length,
-    get_tendon_force_from_tendon_length,
-    muscle_names: list = None,
-    **kwargs,
-):
-    """Boucle sur les 3 muscles (indices 1, 2, 3)."""
-    if muscle_names is None:
-        muscle_names = [f"Muscle {i}" for i in (1, 2, 3)]
-
-    figures = []
-    for idx in (1, 2, 3):
-        fig, _ = plot_force_length_activation_3d(
-            a=a,
-            fiber_length=fiber_length,
-            tendon_length=tendon_length,
-            muscle_tendon_parameters=muscle_tendon_parameters,
-            get_fiber_force_from_fiber_length=get_fiber_force_from_fiber_length,
-            get_tendon_force_from_tendon_length=get_tendon_force_from_tendon_length,
-            muscle_idx=idx,
-            muscle_names=muscle_names,
-            **kwargs,
-        )
-        figures.append(fig)
-    return figures
-
-def plotmodel(ax, muscle_origins, muscle_insertions, joint_centers, via_point):
-    ax.clear()
-    ax.set_title("Model", fontsize=14)
-
-    origins = np.array(muscle_origins)
-    insertions = np.array(muscle_insertions)
-    markers = np.array(joint_centers)
-    via_point = np.array(via_point)
-
-    ax.scatter(origins[0], origins[1], origins[2], c='r', label='muscle origin', marker='o')
-    ax.scatter(insertions[0], insertions[1], insertions[2], c='b', label='muscle insertion', marker='o')
-    ax.scatter(markers[0], markers[1], markers[2], c='k', label='joint center', marker='o')
-    ax.scatter(via_point[0], via_point[1], via_point[2], c='y', label='tibialis via point', marker='o')
-
-    for i in range(markers.shape[1] - 1):
-        ax.plot([markers[0, i], markers[0, i + 1]],
-                [markers[1, i], markers[1, i + 1]],
-                [markers[2, i], markers[2, i + 1]], color='black')
-
-    for i in range(1, origins.shape[1]):
-        ax.plot([origins[0, i], insertions[0, i]],
-                [origins[1, i], insertions[1, i]],
-                [origins[2, i], insertions[2, i]], color='red')
-
-    ax.plot([origins[0, 0], via_point[0, 0]],
-            [origins[1, 0], via_point[1, 0]],
-            [origins[2, 0], via_point[2, 0]], color='red')
-
-    ax.plot([via_point[0, 0], insertions[0, 0]],
-            [via_point[1, 0], insertions[1, 0]],
-            [via_point[2, 0], insertions[2, 0]], color='red')
-
-    ax.legend()
-    ax.set_xlim([-1, 1])
-    ax.set_ylim([-1, 1])
-    ax.set_zlim([-1, 1])
-    ax.set_box_aspect([1, 1, 1])
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_zlabel('z')
-
-def interactive_model(skeleton_num, muscle_tendon_parameters_num, casadi_function):
-    from matplotlib.gridspec import GridSpec
-
-    q_init = np.zeros(6)
-    muscle_tendon_parameters_num = np.array(muscle_tendon_parameters_num)
-
-    fig = plt.figure(figsize=(14, 9))
-
-    # Layout: 3D view on the left, muscle-architecture diagrams stacked on the right
-    gs = GridSpec(
-        3, 2, figure=fig,
-        width_ratios=[2.0, 1.1],
-        left=0.04, right=0.80, bottom=0.25, top=0.95,
-        hspace=0.55, wspace=0.10,
-    )
-    ax = fig.add_subplot(gs[:, 0], projection='3d')
-
-    arch_names = ['tibialis', 'soleus', 'gastrocnemius']
-    arch_colors = ['#d62728', '#2ca02c', '#9467bd']  # one per muscle
-    ax_arch = [fig.add_subplot(gs[i, 1]) for i in range(3)]
-
-    # ---------------------------------------------------------------
-    # helper: schematic top-view of a pennate muscle (aponeuroses,
-    # fascicles at angle phi, free tendon)
-    # ---------------------------------------------------------------
-    def draw_muscle_architecture(axm, l_f, phi, l_t, name, color):
-        axm.clear()
-
-        # ensure scalars (CasADi DM / np.ndarray safety)
-        l_f = float(np.array(l_f).flatten()[0])
-        phi = float(np.array(phi).flatten()[0])
-        l_t = float(np.array(l_t).flatten()[0])
-
-        h  = l_f * np.sin(phi)   # muscle thickness
-        dx = l_f * np.cos(phi)   # fascicle horizontal projection
-
-        n_fasc = 5
-        apo_length = n_fasc * dx
-
-        # deep and superficial aponeuroses
-        axm.plot([0, apo_length],          [0, 0], 'k-', lw=2)
-        axm.plot([dx, apo_length + dx],    [h, h], 'k-', lw=2)
-
-        # fascicles
-        for i in range(n_fasc + 1):
-            x0 = i * dx
-            axm.plot([x0, x0 + dx], [0, h], color=color, lw=1.3, alpha=0.85)
-
-        # free tendon (extends from the distal end of the superficial aponeurosis)
-        axm.plot([apo_length + dx, apo_length + dx + l_t],
-                 [h, h], color='#1f77b4', lw=3.5)
-
-        # pennation-angle arc
-        r = 0.35 * dx
-        theta = np.linspace(0, phi, 30)
-        axm.plot(r * np.cos(theta), r * np.sin(theta), 'k-', lw=0.8)
-        axm.text(r * 1.25 * np.cos(phi / 2), r * 1.25 * np.sin(phi / 2),
-                 r'$\varphi$', fontsize=8)
-
-        axm.set_title(
-            f'{name}  |  $l_f$={l_f*100:.2f} cm  |  '
-            f'$\\varphi$={np.rad2deg(phi):.1f}°  |  $l_t$={l_t*100:.2f} cm',
-            fontsize=9,
-        )
-        axm.set_aspect('equal')
-        axm.axis('off')
-
-    # ---------------------------------------------------------------
-    # main update callback
-    # ---------------------------------------------------------------
-    def update_plot(val=None):
-        a = np.array([muscle_sliders[i].val for i in range(3)])
-        q = np.array([slider_q[i].val for i in range(6)])
-        q[3:] = np.deg2rad(q[3:])  # q4, q5, q6 from degrees to radians
-
-        musculoskeletal_states_num   = np.concatenate((q, skeleton_num))
-        neuromusculoskeletal_state_num = np.concatenate([a, musculoskeletal_states_num])
-
-        origins, insertions, via_point, markers = casadi_function['forward_kinematics'](musculoskeletal_states_num)
-        plotmodel(ax, origins, insertions, markers, via_point)
-
-        mtu_length     = casadi_function['get_mtu_length'](musculoskeletal_states_num)
-        mtu_moment_arm = casadi_function['get_moment_arm'](musculoskeletal_states_num)
-
-        print('\n================== MTU Length ==================')
-        print(f'tibialis: {float(mtu_length[0]):.4f} m')
-        print(f'soleus: {float(mtu_length[1]):.4f} m')
-        print(f'gastrocnemius: {float(mtu_length[2]):.4f} m')
-
-        print('\n================== Moment Arms ==================')
-        print(f'tibialis: {float(mtu_moment_arm[0, -1]):.4f} m^-1')
-        print(f'soleus: {float(mtu_moment_arm[1, -1]):.4f} m^-1')
-        print(f'gastrocnemius: {float(mtu_moment_arm[2, -1]):.4f} m^-1')
-
-        # === muscle equilibrium ===
-        results = solve_all_muscles(a, mtu_length, muscle_tendon_parameters_num, casadi_function)
-
-        x_opt_tibialis      = results['tibialis']['x_opt']
-        x_opt_soleus        = results['soleus']['x_opt']
-        x_opt_gastrocnemius = results['gastrocnemius']['x_opt']
-        # rooted_variables = [fiber length, pennation angle, tendon length]
-
-        rooted_variables = np.array([x_opt_tibialis[0, 0], x_opt_soleus[0, 0], x_opt_gastrocnemius[0, 0],
-                                     x_opt_tibialis[1, 0], x_opt_soleus[1, 0], x_opt_gastrocnemius[1, 0],
-                                     x_opt_tibialis[2, 0], x_opt_soleus[2, 0], x_opt_gastrocnemius[2, 0]]).flatten()
-
-        all_state = np.concatenate([neuromusculoskeletal_state_num, rooted_variables])
-
-        tendon_force        = casadi_function['get_tendon_force'](all_state, muscle_tendon_parameters_num)
-        fiber_force         = casadi_function['get_fiber_force'](all_state, muscle_tendon_parameters_num)
-        fiber_passive_force = casadi_function['get_fiber_passive_force'](all_state, muscle_tendon_parameters_num)
-        fiber_active_force  = casadi_function['get_fiber_active_force'](all_state, muscle_tendon_parameters_num)
-
-        ankle_torque = casadi_function['get_joint_moment'](all_state, muscle_tendon_parameters_num)
-
-        print('\n================== simulated ==================')
-        print('\n   mtu architecture:')
-        print('     - fiber length:')
-        print(f'tibialis: {float(x_opt_tibialis[0, 0]):.4f} m')
-        print(f'soleus: {float(x_opt_soleus[0, 0]):.4f} m')
-        print(f'gastrocnemius: {float(x_opt_gastrocnemius[0, 0]):.4f} m')
-        print('     - pennation angle:')
-        print(f'tibialis: {float(np.rad2deg(float(np.array(x_opt_tibialis[1, 0]).flatten()[0]))):.4f} deg')
-        print(f'soleus: {float(np.rad2deg(float(np.array(x_opt_soleus[1, 0]).flatten()[0]))):.4f} deg')
-        print(f'gastrocnemius: {float(np.rad2deg(float(np.array(x_opt_gastrocnemius[1, 0]).flatten()[0]))):.4f} deg')
-        print('     - tendon length:')
-        print(f'tibialis: {float(x_opt_tibialis[2, 0]):.4f} m')
-        print(f'soleus: {float(x_opt_soleus[2, 0]):.4f} m')
-        print(f'gastrocnemius: {float(x_opt_gastrocnemius[2, 0]):.4f} m')
-
-        print('\n   tendon force:')
-        print(f'tibialis: {float(tendon_force[0]):.4f} N')
-        print(f'soleus: {float(tendon_force[1]):.4f} N')
-        print(f'gastrocnemius: {float(tendon_force[2]):.4f} N')
-
-        print('\n   fiber force:')
-        print('     - fiber force:')
-        print(f'tibialis: {float(fiber_force[0]):.4f} N')
-        print(f'soleus: {float(fiber_force[1]):.4f} N')
-        print(f'gastrocnemius: {float(fiber_force[2]):.4f} N')
-
-        print('     - fiber passive force:')
-        print(f'tibialis: {float(fiber_passive_force[0]):.4f} N')
-        print(f'soleus: {float(fiber_passive_force[1]):.4f} N')
-        print(f'gastrocnemius: {float(fiber_passive_force[2]):.4f} N')
-
-        print('     - fiber active force:')
-        print(f'tibialis: {float(fiber_active_force[0]):.4f} N')
-        print(f'soleus: {float(fiber_active_force[1]):.4f} N')
-        print(f'gastrocnemius: {float(fiber_active_force[2]):.4f} N')
-
-        print('\n   joint torque:')
-        print(f'ankle moment: {float(ankle_torque[0]):.4f} N.m')
-
-        # === draw muscle architecture diagrams ===
-        x_opts = [x_opt_tibialis, x_opt_soleus, x_opt_gastrocnemius]
-        for axm, x_opt, name, color in zip(ax_arch, x_opts, arch_names, arch_colors):
-            draw_muscle_architecture(
-                axm,
-                x_opt[0, 0],   # fiber length
-                x_opt[1, 0],   # pennation angle
-                x_opt[2, 0],   # tendon length
-                name, color,
-            )
-
-        fig.canvas.draw_idle()
-
-    # ---------------------------------------------------------------
-    # sliders
-    # ---------------------------------------------------------------
-    slider_limits = [
-        (-1, 1),    # q1
-        (-1, 1),    # q2
-        (-1, 1),    # q3
-        (-90, 90),  # q4
-        (0, 90),    # q5
-        (-40, 40),  # q6
-    ]
-    axcolor = 'lightgoldenrodyellow'
-    slider_q = []
-
-    # skeleton configuration
-    for i, (min_val, max_val) in enumerate(slider_limits):
-        ax_slider = plt.axes([0.15, 0.02 + i * 0.035, 0.65, 0.02], facecolor=axcolor)
-        slider = Slider(ax_slider, f'q{i + 1}', min_val, max_val, valinit=0.0)
-        slider.on_changed(update_plot)
-        slider_q.append(slider)
-
-    # muscle activity sliders: tibialis, soleus, gastrocnemius
-    muscle_names = ['tibialis', 'soleus', 'gastroc']
-    muscle_sliders = []
-    slider_width = 0.12
-    slider_height = 0.02
-    top = 0.95
-
-    for i in range(3):
-        ax_muscle = plt.axes(
-            [0.83, top - i * (slider_height + 0.03), slider_width, slider_height],
-            facecolor='mistyrose',
-        )
-        muscle_slider = Slider(ax_muscle, muscle_names[i], 0.0, 1.0, valinit=0.0, color='red')
-        muscle_slider.on_changed(update_plot)
-        muscle_sliders.append(muscle_slider)
-
-    update_plot()
-    ax.view_init(elev=90, azim=-90)
-    plt.show()
 
 def hypothetical_data_generator(skeleton_num, muscle_tendon_parameters_num, casadi_function):
     """ generate hypothetical data to make the NLP
@@ -2607,6 +2110,9 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
     w, w0, lbw, ubw = [], [], [], []
     g, lbg, ubg = [], [], []
     j = SX(0)
+    j_torque = SX(0)
+    j_fascicle_length = SX(0)
+    j_pennation_angle = SX(0)
 
     e_torque, e_fiber, e_pennation = [], [], []
 
@@ -2692,13 +2198,21 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
         e_fiber_trials = measured_fiber_length - fiber_length_k
         e_pennation_trials = measured_pennation_angle - pennation_angle_k
 
-        j += (e_torque_trials ** 2) / sigma_torque ** 2
-        j += sum1((e_fiber_trials ** 2) / sigma_fiber ** 2)
-        j += sum1((e_pennation_trials ** 2) / sigma_penn ** 2)
+        j_torque += (e_torque_trials ** 2) / sigma_torque ** 2
+        j_fascicle_length += sum1((e_fiber_trials ** 2) / sigma_fiber ** 2)
+        """
+        j_pennation_angle += sum1((e_pennation_trials ** 2) / sigma_penn ** 2)
+        """
 
         e_torque.append(e_torque_trials)
         e_fiber.append(e_fiber_trials)
         e_pennation.append(e_pennation_trials)
+
+    j = j_torque + j_fascicle_length + j_pennation_angle
+    n_element = 4 # number of element compared by trials (1 torque, 3 fibers= 4) or (1 torque, 3 fibers + 3 pennation angle = 7)
+    n_comparison = n_element * n_trials
+
+    j =  j / n_comparison
 
     # ============ Assembly ============ #
     w = vertcat(*w)
@@ -2727,27 +2241,70 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
 
     # ============ NLP solver ============ #
 
+    from mtu_live_callback import run_with_live_plot
+
+    grad_f_func = Function("grad_f", [w], [gradient(j, w)])
+    grad_g_func = Function("grad_g", [w], [jacobian(g, w).T])
+
     opts_ipopt = {
         "ipopt.max_iter": 2500,
         "ipopt.tol": 1e-4,
         "ipopt.print_info_string": "yes",
         "ipopt.linear_solver": "mumps",
+        "ipopt.hessian_approximation": "exact",
+        # PAS de "iteration_callback" ici
     }
+
+    sol = run_with_live_plot(
+        nlp={'x': w, 'f': j, 'g': g},
+        x0=w0, lbx=lbw, ubx=ubw, lbg=lbg, ubg=ubg,
+        opts_ipopt=opts_ipopt,
+        grad_f_func=grad_f_func,
+        grad_g_func=grad_g_func,
+        param_index=param_index,
+        scale=scale,
+        lower_band=lower_band,
+        upper_band=upper_band,
+        initial_guess=initial_guess,
+        muscles=('ta', 'sol', 'gast'),
+        n_trials=n_trials,
+    )
+
     """
+    grad_f_func = Function("grad_f", [w], [gradient(j, w)])
+    grad_g_func = Function("grad_g", [w], [jacobian(g, w).T])
+
+    online_callback = OnlineCallback(nx=w.shape[0],
+                                     ng=g.shape[0],
+                                     grad_f_func=grad_f_func,
+                                     grad_g_func=grad_g_func)
+
     opts_ipopt = {
-        "ipopt.max_iter": 1000,
-        "ipopt.mu_strategy": "monotone",  # plus stable qu'adaptive quand ça diverge
-        "ipopt.bound_push": 1e-2,
-        "ipopt.bound_frac": 1e-2,
-        "ipopt.mu_init": 1e-1,
-        "ipopt.linear_solver": "mumps",
+        "ipopt.max_iter": 2500,
+        "ipopt.tol": 1e-4,
         "ipopt.print_info_string": "yes",
+        "ipopt.linear_solver": "mumps", # ma57,
+        "ipopt.hessian_approximation" : "exact",# ou "limited-memory"
+        "iteration_callback": online_callback
     }
-    """
+
+
+
+    opts_ipopt = {
+        "ipopt.max_iter": 2500,
+        "ipopt.tol": 1e-4,
+        "ipopt.print_info_string": "yes",
+        "ipopt.linear_solver": "mumps", # ma57,
+        "ipopt.hessian_approximation" : "exact",# ou "limited-memory"
+    }
+    
+
+
     nlp = {'x': w, 'f': j, 'g': g}
     solver = nlpsol('solver', 'ipopt', nlp, opts_ipopt)
 
     sol = solver(x0=w0, lbx=lbw, ubx=ubw, lbg=lbg, ubg=ubg)
+    """
 
     # ============ Extraction ============ #
     w_opt = sol['x'].full().flatten()
@@ -2765,11 +2322,6 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
                         err=err_param, cost=cost, n_trials=n_trials)
 
     return param_opt
-
-
-
-
-
 
 
 
@@ -3554,7 +3106,7 @@ def get_initial_guess(muscle_tendon_parameters_num, data, param_config,
 
     # === Marges lst en mètres (measured) ===
     LST_MARGIN_LOW  = 0.20
-    LST_MARGIN_HIGH = 0.02
+    LST_MARGIN_HIGH = 0.03
 
     # ------------------------------------------------------------------
     # Validation de param_config et de la stratégie

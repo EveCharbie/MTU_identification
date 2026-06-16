@@ -242,7 +242,8 @@ def add_tendon_length_to_data(data, skeleton_num, casadi_function,
     mtu_length = np.array(get_mtu_length_vec(musculoskeletal_states))  # (3, n_trials)
 
     # --- Calcul des longueurs de tendon (vectorisé) --- #
-    tendon_length = mtu_length - np.cos(pennation) * fiber_length
+    l_muscle = np.cos(pennation) * fiber_length
+    tendon_length = mtu_length - l_muscle
 
     # --- Écriture dans data --- #
     data[ROW_TENDON_LENGTH, :] = tendon_length
@@ -252,6 +253,15 @@ def add_tendon_length_to_data(data, skeleton_num, casadi_function,
     print("Tendon lengths computed and added to data:")
     for i, name in enumerate(muscle_names):
         print(f"  {name:14s} : "
+              "mtu length -- "
+              f"min={np.nanmin(mtu_length[i]):.4f}, "
+              f"max={np.nanmax(mtu_length[i]):.4f} m")
+        print(f"  {name:14s} : "
+              "muscle length -- "
+              f"min={np.nanmin(l_muscle[i]):.4f}, "
+              f"max={np.nanmax(l_muscle[i]):.4f} m")
+        print(f"  {name:14s} : "
+              "tendon length -- "
               f"min={np.nanmin(tendon_length[i]):.4f}, "
               f"max={np.nanmax(tendon_length[i]):.4f} m")
 

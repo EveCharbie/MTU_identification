@@ -405,15 +405,6 @@ def optimization_nlp_scaled_plain(data, initial_guess, lower_band, upper_band,
 
 
 
-"""
-Variante : paramètres MTU BRUTS (valeurs physiques optimisées directement)
-+ coût PONDÉRÉ par 1/sigma**2.
-Fonction autonome.
-"""
-
-
-
-
 def optimization_nlp_raw_weighted(data, initial_guess, lower_band, upper_band,
                                   skeleton_num, muscle_tendon_parameters_num,
                                   unknown_parameters, casadi_function, param_index):
@@ -782,18 +773,6 @@ def optimization_nlp_raw_plain(data, initial_guess, lower_band, upper_band,
                         err=err_param, cost=cost, n_trials=n_trials)
 
     return param_opt
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
