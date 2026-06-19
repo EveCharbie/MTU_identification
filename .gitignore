@@ -1,2 +1,8 @@
 # ignore extension
 *.asv
+
+.idea/
+
+casadi-3.6.7-osx_arm64-matlab2018b/\+casadi/
+
+casadi-3.6.7-osx_arm64-matlab2018b/
