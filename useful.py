@@ -2189,9 +2189,22 @@ def optimization_nlp(data, initial_guess, lower_band, upper_band, skeleton_num,
         lbg += [0] * 9
         ubg += [0] * 9
 
+        # Test exp values
+        import casadi as cas
+        print(cas.evalf(casadi_function['equilibrium_error_all_muscle'](
+            cas.vertcat(fl_meas, pa_meas, tl_meas),
+            cas.vertcat(a_trial, mtu_length, scale),
+        )))
+
         # --- Torque simulation --- #
         all_states = vertcat(SX(neuromusculoskeletal_state_trial.tolist()), w_k)
         torque_simulated = casadi_function['get_joint_moment'](all_states, up_phys)
+
+        # Test torque estimation
+        print(cas.evalf(casadi_function['get_joint_moment'](
+            cas.vertcat(SX(neuromusculoskeletal_state_trial.tolist()), cas.vertcat(fl_meas, pa_meas, tl_meas)),
+            scale,
+        )))
 
         # --- Residuals --- #
         e_torque_trials = measured_torque - torque_simulated
