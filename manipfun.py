@@ -226,9 +226,9 @@ def add_tendon_length_to_data(data, skeleton_num, casadi_function,
 
     # --- Construction de l'état musculo-squelettique vectorisé --- #
     # q de taille (6, n_trials) : q[0:4]=0, q[4]=q_knee, q[5]=q_ankle
-    q_full = np.zeros((6, n_trials))
-    q_full[4, :] = q_knee
-    q_full[5, :] = q_ankle
+    q_full = np.zeros((3, n_trials))
+    q_full[1, :] = q_knee
+    q_full[2, :] = q_ankle
 
     # skeleton_num est constant : on le broadcast sur n_trials
     skeleton_broadcast = np.tile(np.asarray(skeleton_num).reshape(-1, 1),

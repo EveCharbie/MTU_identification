@@ -5,6 +5,7 @@ import useful
 import matplotlib.pyplot as plt
 import numpy as np
 import model_plot as pm_
+import biorbd_casadi as biorbd
 
 #############################################################################
 #     1. Organized path and files in a dictionary
@@ -111,7 +112,11 @@ param_config = {
     'lst': 'sym',
     'kt': 'sym',
 }
-casadi_function, unknown_parameters, definition = useful.get_model_equation(param_config)
+
+biorbd_model = biorbd.Model(
+    "num_data/TEJ_03/TEJ_03_straight.bioMod")  # TODO : make it modulable and add both models (bent vs straight)
+
+casadi_function, unknown_parameters, definition = useful.get_model_equation(biorbd_model, param_config)
 
 
 # 2.2.4 Test the model
@@ -553,7 +558,8 @@ param_config = {
     'kt': 'sym',
 }
 
-skeleton_num, muscle_tendon_parameters_num = import_functions.get_model_osim_scaled(osim_folder,osim_name,mtu_params = mtu_params)
+# skeleton_num, muscle_tendon_parameters_num = import_functions.get_model_osim_scaled(osim_folder,osim_name,mtu_params = mtu_params)
+skeleton_num, muscle_tendon_parameters_num = import_functions.get_model_biomod(biorbd_model, mtu_params=mtu_params)
 casadi_function, unknown_parameters, definition = useful.get_model_equation(param_config=param_config)
 
 # 6.1.5 training data set and import test data set

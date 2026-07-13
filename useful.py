@@ -1,13 +1,15 @@
 import os
 import numpy as np
 import pandas as pd
-from casadi import SX, DM, vertcat, horzcat, Function, sqrt, exp, if_else, logic_and, sum1, jacobian, rootfinder, nlpsol, cos, sin, fmin, fmax, log1p,log, gradient
+from casadi import MX, SX, DM, vertcat, horzcat, Function, sqrt, exp, if_else, logic_and, sum1, jacobian, rootfinder, nlpsol, cos, sin, fmin, fmax, log1p,log, gradient
 import math
 import matplotlib.pyplot as plt
 from fontTools.misc.bezierTools import epsilon
 from matplotlib.widgets import Slider
 import matplotlib
 from live_plot_utils import OnlineCallback
+import biorbd_casadi as biorbd
+
 
 matplotlib.use('TkAgg')  # or 'Qt5Agg', depending on your environment
 
@@ -163,6 +165,52 @@ def get_skeleton():
     return (q, moment_arm, musculoskeletal_params, musculoskeletal_states,
             forward_kinematics, get_mtu_length, get_moment_arm)
 
+def get_skeleton_biorbd(model):
+
+    # Hip, knee, ankle
+    q_mx = MX.sym("q", 3)
+
+    gastroc_points = [
+            m.to_mx() for m in model.muscle(0).musclesPointsInGlobal(model, q_mx)
+        ]
+    soleus_points = [
+            m.to_mx() for m in model.muscle(1).musclesPointsInGlobal(model, q_mx)
+        ]
+    tibialis_points = [
+            m.to_mx() for m in model.muscle(2).musclesPointsInGlobal(model, q_mx)
+        ]
+    origin_tibialis_global = tibialis_points[0]
+    via_tibialis_global = tibialis_points[1]
+    insertion_tibialis_global = tibialis_points[2]
+
+    origin_soleus_global = soleus_points[0]
+    insertion_soleus_global = soleus_points[1]
+
+    origin_gastrocnemius_global = gastroc_points[0]
+    insertion_gastrocnemius_global = gastroc_points[1]
+
+    umt_length = vertcat(
+        sqrt(sum1((insertion_tibialis_global - via_tibialis_global) ** 2)) +
+        sqrt(sum1((via_tibialis_global - origin_tibialis_global) ** 2)),  # tibialis
+        sqrt(sum1((insertion_soleus_global - origin_soleus_global) ** 2)),  # soleus
+        sqrt(sum1((insertion_gastrocnemius_global - origin_gastrocnemius_global) ** 2))  # gastroc
+    )
+
+    # ── CasADi exported functions ─────────────────────────────────────────────
+    get_mtu_length = Function("get_mtu_length",
+                              [q_mx],
+                              [umt_length],
+                              ["musculoskeletal_states"],
+                              ["umt_length (tibialis, soleus, gastrocnemius)"])
+
+    get_moment_arm = Function("get_moment_arm",
+                              [q_mx],
+                              [model.musclesLengthJacobian(q_mx).to_mx()],
+                              ["musculoskeletal_states"],
+                              ["moment Arm (tibialis, soleus, gastrocnemius)"])
+
+    return get_mtu_length, get_moment_arm
+
 def get_fiber_active_force_length(a, normalized_fiber_length, maximal_isometric_force):
     # === Active Force-Length (S2) ===
     # First Gaussian coefficients
@@ -283,8 +331,12 @@ def get_tendon_force_length(normalized_tendon_length, k_tendon, maximal_isometri
 def get_muscle_total_force(fiber_active_force_length, normalized_fiber_force_velocity, fiber_passive_force):
     return fiber_active_force_length * normalized_fiber_force_velocity + fiber_passive_force
 
-def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
-                       param_config=None, fixed_values=None):
+def get_muscle_dynamic(
+        get_moment_arm: Function,
+        n_muscles: int,
+        param_config=None,
+        fixed_values=None,
+):
     """
     Build CasADi functions for muscle-tendon dynamics (De Groote 2016 model),
     including equilibrium rootfinders (per-muscle and all-muscles).
@@ -409,8 +461,8 @@ def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
     )
 
     # ========= 5. Wrap into CasADi functions ========= #
-    neuromusculoskeletal_state = vertcat(a, q, musculoskeletal)
-    all_states = vertcat(neuromusculoskeletal_state, rooted_variables)
+    q = SX.sym("q", 3)
+    all_states = vertcat(a, q, rooted_variables)
 
     # ========= 6. Rootfinder : équilibre muscle-tendon ========= #
     # Input géométrique : longueur MTU (ℓmt) — donnée par la cinématique
@@ -484,7 +536,7 @@ def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
     )
 
     # ========= 4. Computing Joint Moments and Angles    ========= #
-    joint_torque = moment_arm * tendon_force
+    joint_torque = get_moment_arm(q) * tendon_force
     joint_torque = sum1(joint_torque[:, -1:])
 
     get_tendon_force_from_tendon_length = Function(
@@ -542,7 +594,7 @@ def get_muscle_dynamic(q, moment_arm, musculoskeletal, n_muscles,
         'param_config': dict(param_config),
     }
 
-def get_model_equation(param_config=None, fixed_values=None, n_muscles=3):
+def get_model_equation(biorbd_model, param_config=None, fixed_values=None, n_muscles=3):
     """
     Build the full musculoskeletal model by merging skeleton kinematics
     and muscle-tendon dynamics into a unified set of CasADi functions.
@@ -588,12 +640,11 @@ def get_model_equation(param_config=None, fixed_values=None, n_muscles=3):
         }
 
     # ========= 2. Skeleton (kinematics) ========= #
-    (q, moment_arm, musculoskeletal_params, musculoskeletal_states,
-     forward_kinematics, get_mtu_length, get_moment_arm) = get_skeleton()
+    get_mtu_length, get_moment_arm = get_skeleton_biorbd(biorbd_model)
 
     # ========= 3. Muscle-tendon dynamics ========= #
     funcs = get_muscle_dynamic(
-        q, moment_arm, musculoskeletal_params,
+        get_moment_arm,
         n_muscles=n_muscles,
         param_config=param_config,
         fixed_values=fixed_values,
@@ -606,7 +657,6 @@ def get_model_equation(param_config=None, fixed_values=None, n_muscles=3):
     }
 
     extras = {
-        'forward_kinematics': forward_kinematics,
         'get_mtu_length': get_mtu_length,
         'get_moment_arm': get_moment_arm,
         'mtu_parameters_sym': funcs['muscle_tendon_parameters'],

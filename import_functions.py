@@ -2,6 +2,7 @@ import os
 import numpy as np
 import xml.etree.ElementTree as ET
 from scipy.optimize import brentq
+from casadi import evalf
 
 # Coefficients par défaut de De Groote 2016 (eq. S1)
 DEGROOTE_C1 = 0.200
@@ -462,6 +463,31 @@ def get_model_osim_scaled(oism_path, oism_file, mtu_params=None):
     except Exception as e:
         print(f"Error extracting parameters: {e}")
         return np.zeros(n_msk_out), np.zeros(n_mtu_out)
+
+
+def get_model_biomod(biorbd_model, mtu_params=None):
+
+    muscle_tendon_parameters = {}
+    for i_muscle in range(biorbd_model.nbMuscles()):
+        muscle = biorbd_model.muscle(i_muscle)
+        muscle_name = muscle.name().to_string()
+
+        # TODO: fill these
+        muscle_tendon_parameters[muscle_name]["l0m"] = evalf(muscle.characteristics().optimalLength().to_mx())
+        muscle_tendon_parameters[muscle_name]["phi0"] = evalf(muscle.characteristics().pennationAngle().to_mx())
+        muscle_tendon_parameters[muscle_name]["f0m"] =  evalf(muscle.characteristics().forceIsoMax().to_mx())
+        muscle_tendon_parameters[muscle_name]["lst"] = evalf(muscle.characteristics().tendonSlackLength().to_mx())
+        muscle_tendon_parameters[muscle_name]["eps0_t"] = evalf(muscle.characteristics().forceIsoMax().to_mx()) #?
+        muscle_tendon_parameters[muscle_name]["eps0_m"] = evalf(muscle.characteristics().forceIsoMax().to_mx()) #?
+        muscle_tendon_parameters[muscle_name]["kshape_active"] = evalf(muscle.characteristics().forceIsoMax().to_mx()) #?
+        muscle_tendon_parameters[muscle_name]["km"] = evalf(muscle.characteristics().forceIsoMax().to_mx()) #?
+        muscle_tendon_parameters[muscle_name]["af"] = evalf(muscle.characteristics().forceIsoMax().to_mx()) #?
+        muscle_tendon_parameters[muscle_name]["flen"] = evalf(muscle.characteristics().forceIsoMax().to_mx()) #?
+        muscle_tendon_parameters[muscle_name]["tau_act"] = evalf(muscle.characteristics().forceIsoMax().to_mx()) #?
+        muscle_tendon_parameters[muscle_name]["tau_deact"] = evalf(muscle.characteristics().forceIsoMax().to_mx()) #?
+
+    return muscle_tendon_parameters
+
 
 def _build_joint_index_by_child_body(model):
     """
